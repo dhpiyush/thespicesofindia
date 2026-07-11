@@ -874,6 +874,29 @@ async function loadFromDrive() {
   }
 }
 
+// Move kitchen-data.json to the correct folder if it's in the wrong place
+async function moveDataFileToFolder() {
+  if (!dataFileId || !folderId) return;
+  try {
+    // Get current parents of the file
+    const info = await fetch(`https://www.googleapis.com/drive/v3/files/${dataFileId}?fields=parents`, {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    }).then(r => r.json());
+    const currentParents = (info.parents || []).join(',');
+    // If already in the right folder, do nothing
+    if (info.parents && info.parents.includes(folderId)) return;
+    // Move: add new parent, remove old ones
+    await fetch(`https://www.googleapis.com/drive/v3/files/${dataFileId}?addParents=${folderId}&removeParents=${currentParents}&fields=id`, {
+      method: 'PATCH',
+      headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    console.log('kitchen-data.json moved to folder:', folderId);
+  } catch(e) {
+    console.error('Could not move data file:', e);
+  }
+}
+
 // Save data to Drive (create or update kitchen-data.json)
 async function saveToDrive() {
   if (!accessToken) return;
@@ -885,14 +908,16 @@ async function saveToDrive() {
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
-      // Update existing file
+      // Update content
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${dataFileId}?uploadType=media`, {
         method: 'PATCH',
         headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
         body: blob
       });
+      // Make sure file is in the right folder (moves it if it ended up in Drive root)
+      if (folderId) await moveDataFileToFolder();
     } else {
-      // Create new file
+      // Create new file directly in the selected folder
       const meta = { name: DATA_FILENAME, mimeType: 'application/json' };
       if (folderId) meta.parents = [folderId];
       const form = new FormData();
@@ -1409,7 +1434,10 @@ function openPicker(){
       monthFolderCache={}; dataFileId=null;
       applyFolderToUI();
       renderSettings();
+      // Load from new folder, then move data file there if it was at root
       await loadFromDrive();
+      await moveDataFileToFolder();
+      await saveToDrive(); // re-save to ensure file is in correct folder
       refreshAll();
     }
   }).build().setVisible(true);
