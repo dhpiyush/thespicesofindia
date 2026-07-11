@@ -1,0 +1,1517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="theme-color" content="#1A1612"/>
+<title>Kitchen Books</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --ink:#1A1612;--ink2:#5A5550;--ink3:#A09890;
+  --paper:#FAF7F2;--paper2:#F0EBE3;--paper3:#E4DDD3;
+  --fire:#C84B1A;--fire-light:#FEF0EA;
+  --green:#2A7A4B;--green-light:#EAF5EE;
+  --red:#C0392B;--red-light:#FDECEA;
+  --border:rgba(26,22,18,0.10);--border2:rgba(26,22,18,0.18);
+  --radius:10px;--radius-lg:16px;
+  --font-display:'Syne',sans-serif;--font-body:'DM Sans',sans-serif;--font-mono:'DM Mono',monospace;
+  --bottom-nav-h:68px;
+}
+html,body{height:100%}
+body{font-family:var(--font-body);background:var(--paper);color:var(--ink);font-size:15px;-webkit-font-smoothing:antialiased}
+
+/* ── DESKTOP LAYOUT ── */
+.shell{display:grid;grid-template-columns:220px 1fr;min-height:100vh}
+.sidebar{background:var(--ink);color:var(--paper);display:flex;flex-direction:column;position:sticky;top:0;height:100vh;overflow:hidden}
+.main{overflow-y:auto;min-height:100vh}
+.bottom-nav{display:none}
+
+/* ── SIDEBAR ── */
+.brand{padding:24px 20px 20px;border-bottom:1px solid rgba(255,255,255,0.08)}
+.brand-icon{width:36px;height:36px;background:var(--fire);border-radius:8px;display:flex;align-items:center;justify-content:center;margin-bottom:10px;font-size:18px}
+.brand h1{font-family:var(--font-display);font-size:16px;font-weight:700;letter-spacing:-0.3px;line-height:1.2}
+.brand p{font-size:11px;color:rgba(255,255,255,0.4);font-family:var(--font-mono);margin-top:3px}
+.nav{padding:16px 12px;flex:1}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:rgba(255,255,255,0.55);transition:all 0.15s;margin-bottom:2px;font-weight:400;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:rgba(255,255,255,0.07);color:rgba(255,255,255,0.85)}
+.nav-item.active{background:rgba(255,255,255,0.12);color:#fff;font-weight:500}
+.nav-item svg{width:16px;height:16px;flex-shrink:0;opacity:0.7}
+.nav-item.active svg{opacity:1}
+.nav-label{font-size:10px;font-family:var(--font-mono);color:rgba(255,255,255,0.25);padding:12px 10px 6px;text-transform:uppercase;letter-spacing:0.08em}
+.sidebar-bottom{padding:16px 12px;border-top:1px solid rgba(255,255,255,0.08)}
+.user-chip{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px}
+.user-av{width:28px;height:28px;border-radius:50%;background:var(--fire);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;font-family:var(--font-mono)}
+.user-name{font-size:12px;color:rgba(255,255,255,0.6);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-signout{font-size:11px;color:rgba(255,255,255,0.3);background:none;border:none;cursor:pointer;font-family:var(--font-body)}
+.btn-signout:hover{color:rgba(255,255,255,0.6)}
+
+/* ── PAGES ── */
+.page{display:none;padding:32px 36px;animation:fadeIn 0.2s ease}
+.page.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.page-header{margin-bottom:28px}
+.page-header h2{font-family:var(--font-display);font-size:26px;font-weight:700;letter-spacing:-0.5px;margin-bottom:4px}
+.page-header p{font-size:14px;color:var(--ink2)}
+
+/* ── CARDS ── */
+.card{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);padding:20px 22px;margin-bottom:16px}
+.card-label{font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:12px}
+
+/* ── STATS ── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px}
+.stat-label{font-size:11px;font-family:var(--font-mono);color:var(--ink3);margin-bottom:6px}
+.stat-val{font-family:var(--font-display);font-size:28px;font-weight:700;letter-spacing:-1px;line-height:1}
+.stat-sub{font-size:12px;color:var(--ink2);margin-top:4px}
+.stat.income .stat-val{color:var(--green)}
+.stat.expense .stat-val{color:var(--red)}
+.stat.profit .stat-val{color:var(--fire)}
+
+/* ── AUTH ── */
+#auth-screen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:var(--paper)}
+.auth-box{text-align:center;max-width:380px;padding:2rem}
+.auth-flame{font-size:48px;margin-bottom:16px}
+.auth-box h1{font-family:var(--font-display);font-size:32px;font-weight:700;letter-spacing:-1px;margin-bottom:8px}
+.auth-box p{font-size:14px;color:var(--ink2);line-height:1.6;margin-bottom:28px}
+.btn-google{display:inline-flex;align-items:center;gap:10px;background:var(--ink);color:#fff;border:none;border-radius:var(--radius);padding:13px 24px;font-size:14px;font-weight:500;cursor:pointer;font-family:var(--font-body);transition:opacity 0.15s}
+.btn-google:hover{opacity:0.85}
+.btn-google svg{width:18px;height:18px}
+.auth-note{font-size:12px;color:var(--ink3);margin-top:16px;font-family:var(--font-mono)}
+
+/* ── SETUP BANNER ── */
+.setup-banner{background:var(--fire-light);border:1px solid rgba(200,75,26,0.2);border-radius:var(--radius);padding:12px 16px;font-size:13px;color:var(--fire);margin-bottom:20px;line-height:1.6}
+.setup-banner code{background:rgba(200,75,26,0.1);border-radius:4px;padding:1px 5px;font-family:var(--font-mono);font-size:12px}
+.setup-banner a{color:var(--fire)}
+
+/* ── TABLE ── */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.07em;padding:8px 12px;text-align:left;border-bottom:1px solid var(--border2);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:var(--paper)}
+.amount-in{color:var(--green);font-family:var(--font-mono);font-weight:500}
+.amount-out{color:var(--red);font-family:var(--font-mono);font-weight:500}
+.badge{display:inline-block;font-size:10px;font-family:var(--font-mono);padding:2px 8px;border-radius:20px;white-space:nowrap}
+.badge-in{background:var(--green-light);color:var(--green)}
+.badge-out{background:var(--red-light);color:var(--red)}
+.badge-linked{background:#EEF2FF;color:#3730A3}
+.badge-cat{background:var(--paper2);color:var(--ink2)}
+.badge-private{background:#F3F0FF;color:#6D28D9;font-style:italic}
+
+/* ── DROP ZONE ── */
+.drop-zone{border:1.5px dashed var(--border2);border-radius:var(--radius-lg);padding:2.5rem;text-align:center;cursor:pointer;transition:all 0.15s;background:var(--paper2)}
+.drop-zone:hover,.drop-zone.drag-over{border-color:var(--fire);background:var(--fire-light)}
+.drop-icon{width:48px;height:48px;margin:0 auto 12px;background:#fff;border:1px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:22px}
+.drop-zone h3{font-size:15px;font-weight:500;margin-bottom:4px}
+.drop-zone p{font-size:13px;color:var(--ink2)}
+.drop-zone small{font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:8px;display:block}
+input[type=file]{display:none}
+
+/* ── BUTTONS ── */
+.btn{display:inline-flex;align-items:center;gap:7px;padding:9px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;font-family:var(--font-body);transition:all 0.15s;border:none}
+.btn-primary{background:var(--ink);color:#fff}
+.btn-primary:hover{opacity:0.85}
+.btn-primary:disabled{opacity:0.35;cursor:not-allowed}
+.btn-secondary{background:none;color:var(--ink2);border:1px solid var(--border2)}
+.btn-secondary:hover{background:var(--paper2)}
+.btn-fire{background:var(--fire);color:#fff}
+.btn-fire:hover{opacity:0.9}
+.btn-sm{padding:5px 10px;font-size:12px}
+
+/* ── MONTH TABS ── */
+.month-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px}
+.month-tab{padding:6px 14px;border-radius:20px;font-size:12px;font-family:var(--font-mono);cursor:pointer;border:1px solid var(--border2);background:none;color:var(--ink2);transition:all 0.15s}
+.month-tab.active{background:var(--ink);color:#fff;border-color:transparent}
+.month-tab:hover:not(.active){background:var(--paper2)}
+
+/* ── BAR CHART ── */
+.bar-chart{display:flex;align-items:flex-end;gap:6px;height:140px;margin:16px 0 8px;padding:0 4px}
+.bar-group{display:flex;flex-direction:column;align-items:center;flex:1;gap:3px}
+.bar-wrap{display:flex;gap:2px;align-items:flex-end;height:120px;width:100%}
+.bar{flex:1;border-radius:4px 4px 0 0;min-height:4px;transition:height 0.4s ease}
+.bar.income-bar{background:var(--green)}
+.bar.expense-bar{background:var(--red-light);border:1px solid rgba(192,57,43,0.3)}
+.bar-label{font-size:9px;font-family:var(--font-mono);color:var(--ink3);text-align:center}
+.chart-legend{display:flex;gap:16px;justify-content:center;margin-top:8px}
+.legend-item{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--ink2)}
+.legend-dot{width:8px;height:8px;border-radius:2px}
+
+/* ── FILTERS ── */
+.filters{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.filter-input{padding:7px 12px;border:1px solid var(--border);border-radius:var(--radius);background:#fff;font-size:13px;font-family:var(--font-body);color:var(--ink);outline:none}
+.filter-input:focus{border-color:var(--fire)}
+select.filter-input{cursor:pointer}
+.cat-select{padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:var(--font-mono);background:#fff;color:var(--ink);cursor:pointer;max-width:150px}
+
+/* ── RECEIPTS ── */
+.receipt-list{display:flex;flex-direction:column;gap:6px;margin-top:12px}
+.receipt-item{display:flex;align-items:center;gap:10px;background:var(--paper2);border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;font-size:13px}
+.receipt-icon{font-size:18px;flex-shrink:0}
+.receipt-info{flex:1;min-width:0}
+.receipt-name{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.receipt-meta{font-size:11px;color:var(--ink3);font-family:var(--font-mono)}
+.receipt-tag{font-size:10px;padding:2px 8px;border-radius:20px;font-family:var(--font-mono)}
+.tag-done{background:var(--green-light);color:var(--green)}
+.tag-uploading{background:var(--fire-light);color:var(--fire)}
+.tag-ready{background:var(--paper3);color:var(--ink2)}
+.tag-error{background:var(--red-light);color:var(--red)}
+.btn-x{background:none;border:none;cursor:pointer;color:var(--ink3);font-size:16px;padding:2px 4px}
+.btn-x:hover{color:var(--red)}
+.progress-bar{height:2px;background:var(--border);border-radius:2px;margin-top:4px;overflow:hidden}
+.progress-fill{height:100%;background:var(--fire);border-radius:2px;transition:width 0.3s}
+
+/* ── MODAL ── */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:100;display:flex;align-items:center;justify-content:center}
+.modal{background:#fff;border-radius:var(--radius-lg);padding:24px;width:520px;max-width:90vw;max-height:80vh;overflow-y:auto}
+.modal h3{font-family:var(--font-display);font-size:18px;font-weight:700;margin-bottom:6px}
+.modal p{font-size:13px;color:var(--ink2);margin-bottom:16px}
+.modal-list{display:flex;flex-direction:column;gap:6px;max-height:300px;overflow-y:auto}
+.modal-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.15s}
+.modal-item:hover{border-color:var(--fire);background:var(--fire-light)}
+.modal-item.selected{border-color:var(--fire);background:var(--fire-light)}
+.modal-actions{display:flex;gap:8px;margin-top:16px;justify-content:flex-end}
+
+/* ── EMPTY ── */
+.empty{text-align:center;padding:3rem 1rem;color:var(--ink3)}
+.empty-icon{font-size:36px;margin-bottom:12px}
+.empty h3{font-size:15px;font-weight:500;color:var(--ink2);margin-bottom:4px}
+.empty p{font-size:13px}
+
+/* ── MISC ── */
+.row{display:flex;gap:12px;align-items:center}
+.flex-1{flex:1}
+.mt-4{margin-top:16px}
+.tag{display:inline-flex;align-items:center;gap:4px;font-size:11px;padding:2px 8px;border-radius:20px;font-family:var(--font-mono)}
+.tag-kor{background:#EFF6FF;color:#1D4ED8}
+
+/* ════════════════════════════════════════
+   MOBILE STYLES  (≤ 768px)
+════════════════════════════════════════ */
+@media(max-width:768px){
+
+  /* Layout: single column, no sidebar */
+  .shell{grid-template-columns:1fr;min-height:100vh}
+  .sidebar{display:none}
+  .main{padding-bottom:calc(var(--bottom-nav-h) + 16px)}
+
+  /* Pages */
+  .page{padding:16px 16px 8px}
+  .page-header{margin-bottom:20px}
+  .page-header h2{font-size:22px}
+
+  /* Stats: 2 cols on mobile */
+  .stats{grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+  .stat{padding:14px 14px}
+  .stat-val{font-size:22px}
+
+  /* Cards */
+  .card{padding:16px;margin-bottom:12px;border-radius:14px}
+
+  /* Tables: scrollable */
+  .tbl-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  td,th{padding:8px 10px}
+
+  /* Filters: stack */
+  .filters{flex-direction:column;align-items:stretch}
+  .filter-input{width:100%}
+
+  /* Buttons full-width where useful */
+  .page-header .row{flex-direction:column;align-items:stretch;gap:10px}
+  .page-header .row .btn{justify-content:center}
+
+  /* Month tabs: scroll horizontal */
+  .month-tabs{flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px}
+  .month-tabs::-webkit-scrollbar{display:none}
+
+  /* Bar chart smaller */
+  .bar-chart{height:100px}
+  .bar-wrap{height:80px}
+
+  /* Modal: bottom sheet on mobile */
+  .modal-overlay{align-items:flex-end}
+  .modal{width:100%;max-width:100%;border-radius:20px 20px 0 0;max-height:85vh;padding:20px 20px 32px}
+
+  /* ── BOTTOM NAV ── */
+  .bottom-nav{
+    display:flex;position:fixed;bottom:0;left:0;right:0;
+    height:var(--bottom-nav-h);
+    background:var(--ink);
+    z-index:50;
+    padding:0 8px;
+    padding-bottom:env(safe-area-inset-bottom);
+    border-top:1px solid rgba(255,255,255,0.06);
+    align-items:center;justify-content:space-around;
+  }
+  .bnav-item{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:4px;flex:1;padding:8px 4px;
+    color:rgba(255,255,255,0.45);
+    background:none;border:none;cursor:pointer;
+    font-family:var(--font-body);
+    border-radius:10px;transition:all 0.15s;
+    position:relative;
+  }
+  .bnav-item.active{color:#fff}
+  .bnav-item svg{width:22px;height:22px}
+  .bnav-label{font-size:10px;font-family:var(--font-mono);letter-spacing:0.02em}
+
+  /* ── FAB: Camera upload button ── */
+  .bnav-fab{
+    flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    position:relative;
+  }
+  .fab-btn{
+    width:52px;height:52px;border-radius:50%;
+    background:var(--fire);color:#fff;
+    border:none;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 4px 16px rgba(200,75,26,0.45);
+    transition:transform 0.15s, box-shadow 0.15s;
+    margin-top:-18px;
+  }
+  .fab-btn:active{transform:scale(0.93);box-shadow:0 2px 8px rgba(200,75,26,0.3)}
+  .fab-btn svg{width:24px;height:24px}
+  .fab-label{font-size:10px;font-family:var(--font-mono);color:rgba(255,255,255,0.45)}
+
+  /* ── MOBILE QUICK-UPLOAD SCREEN ── */
+  #page-quickupload{padding:16px}
+  .qu-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+  .qu-header h2{font-family:var(--font-display);font-size:22px;font-weight:700}
+
+  /* Big camera/file buttons */
+  .qu-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:20px}
+  .qu-btn{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:10px;padding:24px 12px;
+    background:#fff;border:1.5px dashed var(--border2);
+    border-radius:var(--radius-lg);cursor:pointer;
+    transition:all 0.15s;font-family:var(--font-body);
+    color:var(--ink);
+  }
+  .qu-btn:active{background:var(--fire-light);border-color:var(--fire)}
+  .qu-btn-icon{font-size:32px}
+  .qu-btn-label{font-size:13px;font-weight:500;text-align:center}
+  .qu-btn-sub{font-size:11px;color:var(--ink3);font-family:var(--font-mono);text-align:center}
+
+  /* Pending queue on quick upload */
+  .qu-queue{margin-bottom:16px}
+  .qu-queue-label{font-size:11px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px}
+  .qu-item{
+    display:flex;align-items:center;gap:12px;
+    background:#fff;border:1px solid var(--border);
+    border-radius:var(--radius);padding:12px 14px;
+    margin-bottom:8px;
+  }
+  .qu-item-thumb{
+    width:44px;height:44px;border-radius:8px;overflow:hidden;
+    background:var(--paper2);display:flex;align-items:center;justify-content:center;
+    font-size:20px;flex-shrink:0;
+  }
+  .qu-item-thumb img{width:100%;height:100%;object-fit:cover}
+  .qu-item-info{flex:1;min-width:0}
+  .qu-item-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .qu-item-meta{font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:2px}
+  .qu-upload-btn{
+    width:100%;padding:15px;background:var(--fire);color:#fff;
+    border:none;border-radius:var(--radius-lg);
+    font-size:15px;font-weight:500;cursor:pointer;
+    font-family:var(--font-body);
+    display:flex;align-items:center;justify-content:center;gap:8px;
+    transition:opacity 0.15s;
+  }
+  .qu-upload-btn:disabled{opacity:0.35;cursor:not-allowed}
+  .qu-upload-btn:active{opacity:0.85}
+
+  /* Mobile stat cards: horizontal scroll */
+  .mobile-stats{display:flex;gap:10px;overflow-x:auto;-webkit-overflow-scrolling:touch;padding-bottom:4px;margin-bottom:16px}
+  .mobile-stats::-webkit-scrollbar{display:none}
+  .mobile-stat{background:#fff;border:1px solid var(--border);border-radius:var(--radius-lg);padding:14px 16px;flex-shrink:0;min-width:130px}
+  .mobile-stat-label{font-size:10px;font-family:var(--font-mono);color:var(--ink3);margin-bottom:4px}
+  .mobile-stat-val{font-family:var(--font-display);font-size:22px;font-weight:700;letter-spacing:-0.5px}
+
+  /* Receipt upload in main receipts page - mobile friendly */
+  .drop-zone{padding:1.8rem 1rem}
+  .drop-zone h3{font-size:14px}
+
+  /* Uploaded receipts: card style on mobile */
+  .receipt-card{background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px}
+  .receipt-card-icon{font-size:24px;flex-shrink:0}
+  .receipt-card-info{flex:1;min-width:0}
+  .receipt-card-name{font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .receipt-card-meta{font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:2px}
+  .receipt-card-actions{display:flex;gap:6px;margin-top:8px}
+
+  /* Hide desktop table for uploaded receipts on mobile, show cards */
+  .receipts-table-desktop{display:none}
+  .receipts-cards-mobile{display:block}
+
+}
+
+/* Desktop: hide mobile-only elements */
+@media(min-width:769px){
+  .bottom-nav{display:none}
+  #page-quickupload{display:none!important}
+  .mobile-stats{display:none}
+  .receipts-table-desktop{display:block}
+  .receipts-cards-mobile{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- AUTH -->
+<div id="auth-screen">
+  <div class="auth-box">
+    <div class="auth-flame">🔥</div>
+    <h1>Kitchen<br/>Books</h1>
+    <p>Financial overview for your cloud kitchen — revenue, expenses, and receipt archive in one place.</p>
+    <button class="btn-google" onclick="handleAuth()">
+      <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Sign in with Google
+    </button>
+    <div class="auth-note">KOR-exemption · No VAT administration</div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div class="shell" id="app" style="display:none">
+
+  <!-- DESKTOP SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🔥</div>
+      <h1>Kitchen<br/>Books</h1>
+      <p>Cloud kitchen · KOR</p>
+    </div>
+    <nav class="nav">
+      <button class="nav-item active" onclick="showPage('dashboard',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Dashboard
+      </button>
+      <button class="nav-item" onclick="showPage('transactions',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        Transactions
+      </button>
+      <button class="nav-item" onclick="showPage('receipts',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Receipts
+      </button>
+      <div class="nav-label">Reports</div>
+      <button class="nav-item" onclick="showPage('pl',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Profit & Loss
+      </button>
+      <div class="nav-label">General</div>
+      <button class="nav-item" onclick="showPage('settings',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Settings
+      </button>
+    </nav>
+    <div class="sidebar-bottom">
+      <div style="padding:0 10px 6px;font-size:11px;font-family:var(--font-mono);color:rgba(255,255,255,0.4);cursor:pointer" id="sync-status" onclick="syncNow()" title="Click to force sync">☁️ Auto-sync on</div>
+      <div style="padding:0 10px 8px">
+        <button onclick="syncNow()" style="width:100%;padding:7px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.5);font-size:12px;cursor:pointer;font-family:var(--font-body)">↻ Force sync</button>
+      </div>
+      <div class="user-chip">
+        <div class="user-av" id="user-av">?</div>
+        <span class="user-name" id="user-name-side">–</span>
+        <button class="btn-signout" onclick="handleSignOut()">Sign out</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="main">
+
+    <!-- Mobile sync bar -->
+    <div id="mobile-sync-bar" style="display:none;align-items:center;justify-content:space-between;padding:10px 16px;background:var(--ink);color:rgba(255,255,255,0.6);font-size:12px;font-family:var(--font-mono)">
+      <span id="sync-status-mobile">☁️ Synced</span>
+      <button onclick="syncNow()" style="background:rgba(255,255,255,0.1);border:none;color:rgba(255,255,255,0.7);padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer;font-family:var(--font-body)">↻ Sync</button>
+    </div>
+
+    <div style="padding:0 36px;padding-top:20px" id="setup-wrap" class="setup-wrap-desktop">
+      <div class="setup-banner" id="setup-banner" style="display:none">
+        <strong>Setup required:</strong> Replace <code>YOUR_GOOGLE_CLIENT_ID</code> in the script with your OAuth Client ID from
+        <a href="https://console.cloud.google.com/apis/credentials" target="_blank">Google Cloud Console</a>.
+        Enable the <strong>Drive API</strong> and <strong>Picker API</strong>. After signing in, go to <strong>Receipts → Choose folder</strong> and pick a shared Google Drive folder — both you and your wife must point to the same folder. All data is saved as <code>kitchen-data.json</code> inside that folder.
+      </div>
+    </div>
+
+    <!-- DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="page-header">
+        <h2>Dashboard</h2>
+        <p>Current year — all months</p>
+      </div>
+      <!-- Mobile horizontal stats -->
+      <div class="mobile-stats">
+        <div class="mobile-stat"><div class="mobile-stat-label">Revenue</div><div class="mobile-stat-val income" id="m-stat-income" style="color:var(--green)">€0</div></div>
+        <div class="mobile-stat"><div class="mobile-stat-label">Expenses</div><div class="mobile-stat-val" id="m-stat-expense" style="color:var(--red)">€0</div></div>
+        <div class="mobile-stat"><div class="mobile-stat-label">Net result</div><div class="mobile-stat-val" id="m-stat-profit" style="color:var(--fire)">€0</div></div>
+        <div class="mobile-stat"><div class="mobile-stat-label">Receipts</div><div class="mobile-stat-val" id="m-stat-receipts">0</div></div>
+      </div>
+      <!-- Desktop 4-col stats -->
+      <div class="stats">
+        <div class="stat income"><div class="stat-label">Total revenue</div><div class="stat-val" id="stat-income">€ 0</div><div class="stat-sub" id="stat-income-sub">0 transactions</div></div>
+        <div class="stat expense"><div class="stat-label">Total expenses</div><div class="stat-val" id="stat-expense">€ 0</div><div class="stat-sub" id="stat-expense-sub">0 transactions</div></div>
+        <div class="stat profit"><div class="stat-label">Net result</div><div class="stat-val" id="stat-profit">€ 0</div><div class="stat-sub"><span class="tag tag-kor">KOR · no VAT</span></div></div>
+        <div class="stat"><div class="stat-label">Receipts saved</div><div class="stat-val" id="stat-receipts">0</div><div class="stat-sub" id="stat-receipts-linked">0 linked</div></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Monthly overview</div>
+        <div class="bar-chart" id="bar-chart"></div>
+        <div class="chart-legend">
+          <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div>Revenue</div>
+          <div class="legend-item"><div class="legend-dot" style="background:var(--red-light);border:1px solid rgba(192,57,43,0.3)"></div>Expenses</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Recent transactions</div>
+        <div id="recent-txn-list"></div>
+      </div>
+    </div>
+
+    <!-- QUICK UPLOAD (mobile only) -->
+    <div class="page" id="page-quickupload">
+      <div class="qu-header">
+        <h2>📸 Upload receipt</h2>
+      </div>
+      <div style="font-size:13px;color:var(--ink2);margin-bottom:16px">Take a photo or choose a file from your phone.</div>
+
+      <div style="margin-bottom:16px">
+        <div class="card-label">Drive folder</div>
+        <div class="row" style="gap:8px">
+          <input class="filter-input flex-1" id="qu-folder-name" placeholder="No folder selected" readonly style="font-size:13px"/>
+          <button class="btn btn-secondary btn-sm" onclick="pickFolder()">Choose</button>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:5px" id="qu-folder-hint">Files go to Drive root if none selected.</div>
+      </div>
+
+      <div class="qu-actions">
+        <label class="qu-btn">
+          <div class="qu-btn-icon">📷</div>
+          <div class="qu-btn-label">Take photo</div>
+          <div class="qu-btn-sub">Camera</div>
+          <input type="file" accept="image/*" capture="environment" onchange="addReceiptsQU(this.files)"/>
+        </label>
+        <label class="qu-btn">
+          <div class="qu-btn-icon">📁</div>
+          <div class="qu-btn-label">Choose file</div>
+          <div class="qu-btn-sub">PDF or image</div>
+          <input type="file" accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" multiple onchange="addReceiptsQU(this.files)"/>
+        </label>
+      </div>
+
+      <div class="qu-queue" id="qu-queue" style="display:none">
+        <div class="qu-queue-label">Ready to upload</div>
+        <div id="qu-queue-list"></div>
+      </div>
+
+      <button class="qu-upload-btn" id="qu-upload-btn" onclick="uploadAllReceipts(true)" disabled>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        Upload to Drive
+      </button>
+
+      <div style="margin-top:20px">
+        <div class="card-label">Recent uploads</div>
+        <div id="qu-recent-list">
+          <div style="text-align:center;padding:1.5rem;color:var(--ink3);font-size:13px">No receipts yet</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TRANSACTIONS -->
+    <div class="page" id="page-transactions">
+      <div class="page-header">
+        <div class="row">
+          <div class="flex-1">
+            <h2>Transactions</h2>
+            <p>Import your ING bank statement (CSV)</p>
+          </div>
+          <label class="btn btn-fire" style="cursor:pointer">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Import ING CSV
+            <input type="file" accept=".csv" onchange="importING(this)"/>
+          </label>
+        </div>
+      </div>
+      <div class="filters">
+        <input class="filter-input" type="text" id="search-txn" placeholder="Search…" oninput="renderTransactions()" style="flex:1;min-width:140px"/>
+        <select class="filter-input" id="filter-type" onchange="renderTransactions()">
+          <option value="">All types</option>
+          <option value="in">Revenue</option>
+          <option value="out">Expense</option>
+        </select>
+        <select class="filter-input" id="filter-month" onchange="renderTransactions()">
+          <option value="">All months</option>
+        </select>
+        <select class="filter-input" id="filter-cat" onchange="renderTransactions()">
+          <option value="">All categories</option>
+        </select>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div class="tbl-wrap" id="txn-table-wrap">
+          <div class="empty"><div class="empty-icon">📂</div><h3>No transactions</h3><p>Import your ING CSV to get started</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- RECEIPTS -->
+    <div class="page" id="page-receipts">
+      <div class="page-header">
+        <h2>Receipts</h2>
+        <p>Upload receipts to Google Drive and link to transactions</p>
+      </div>
+      <div class="card">
+        <div class="card-label">Google Drive folder</div>
+        <div class="row">
+          <input class="filter-input flex-1" id="folder-name-r" placeholder="No folder selected — files go to Drive root" readonly/>
+          <button class="btn btn-secondary" onclick="pickFolder()">Choose folder</button>
+        </div>
+        <div style="font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:6px" id="folder-hint-r">Files will upload to Drive root if no folder selected.</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Add receipts</div>
+        <div class="drop-zone" id="drop-zone-r"
+          onclick="document.getElementById('receipt-input').click()"
+          ondragover="onDragOver(event,'drop-zone-r')" ondragleave="onDragLeave('drop-zone-r')" ondrop="onDropReceipt(event)">
+          <div class="drop-icon">🧾</div>
+          <h3>Drop receipts here</h3>
+          <p>or click to browse</p>
+          <small>PDF · JPG · PNG · max 20 MB</small>
+        </div>
+        <input type="file" id="receipt-input" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" onchange="addReceipts(this.files)"/>
+        <div class="receipt-list" id="receipt-list"></div>
+        <div class="row mt-4" style="justify-content:flex-end">
+          <button class="btn btn-secondary btn-sm" onclick="clearDoneReceipts()">Clear completed</button>
+          <button class="btn btn-primary" id="upload-receipts-btn" onclick="uploadAllReceipts(false)" disabled>Upload to Drive</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-label">Uploaded receipts</div>
+        <!-- Desktop table -->
+        <div class="receipts-table-desktop" id="uploaded-receipts-desktop">
+          <div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>
+        </div>
+        <!-- Mobile cards -->
+        <div class="receipts-cards-mobile" id="uploaded-receipts-mobile">
+          <div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- P&L -->
+    <div class="page" id="page-pl">
+      <div class="page-header">
+        <div class="row">
+          <div class="flex-1">
+            <h2>Profit & Loss</h2>
+            <p>By category — KOR-exempt, no VAT</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="exportCSV()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+      <div class="month-tabs" id="pl-months"></div>
+      <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat income"><div class="stat-label">Revenue</div><div class="stat-val" id="pl-income">€ 0</div></div>
+        <div class="stat expense"><div class="stat-label">Expenses</div><div class="stat-val" id="pl-expense">€ 0</div></div>
+        <div class="stat profit"><div class="stat-label">Net result</div><div class="stat-val" id="pl-profit">€ 0</div></div>
+      </div>
+      <div class="card"><div class="card-label">Revenue by category</div><div id="pl-income-cats"></div></div>
+      <div class="card"><div class="card-label">Expenses by category</div><div id="pl-expense-cats"></div></div>
+      <div class="card" style="border-color:rgba(109,40,217,0.15);background:#FDFCFF">
+        <div class="card-label" style="color:#6D28D9">Private transfers · excluded from P&amp;L</div>
+        <div id="pl-private"><p style="font-size:13px;color:var(--ink3)">No private transfers</p></div>
+      </div>
+    </div>
+
+
+    <!-- SETTINGS -->
+    <div class="page" id="page-settings">
+      <div class="page-header">
+        <h2>Settings</h2>
+        <p>Configure your kitchen bookkeeping preferences</p>
+      </div>
+
+      <!-- Drive Folder -->
+      <div class="card">
+        <div class="card-label">📁 Google Drive folder</div>
+        <p style="font-size:13px;color:var(--ink2);margin-bottom:16px;line-height:1.6">
+          All receipts and transaction data will be stored here. Receipts go into monthly subfolders (e.g. <code style="font-family:var(--font-mono);font-size:12px;background:var(--paper2);padding:1px 5px;border-radius:4px">2026-07/</code>). The shared data file <code style="font-family:var(--font-mono);font-size:12px;background:var(--paper2);padding:1px 5px;border-radius:4px">kitchen-data.json</code> is saved at the root of this folder so both you and your wife share the same data.
+        </p>
+        <div style="background:var(--paper2);border-radius:var(--radius);padding:14px 16px;margin-bottom:14px;display:flex;align-items:center;gap:12px" id="settings-folder-display">
+          <div style="font-size:24px">📂</div>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:500;font-size:14px" id="settings-folder-name">No folder selected</div>
+            <div style="font-size:11px;color:var(--ink3);font-family:var(--font-mono);margin-top:2px" id="settings-folder-id">Choose a folder to get started</div>
+          </div>
+          <span id="settings-folder-badge" style="display:none;font-size:11px;padding:3px 10px;border-radius:20px;background:var(--green-light);color:var(--green);font-family:var(--font-mono)">✓ Set</span>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-fire" onclick="pickFolderFromSettings()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+            Choose Drive folder
+          </button>
+          <button class="btn btn-secondary" onclick="clearFolder()" id="settings-clear-btn" style="display:none">Clear folder</button>
+        </div>
+        <div style="font-size:12px;color:var(--ink3);margin-top:10px;font-family:var(--font-mono)" id="settings-folder-hint"></div>
+      </div>
+
+      <!-- Folder structure info -->
+      <div class="card" style="border-color:rgba(37,99,235,0.15);background:#FAFBFF">
+        <div class="card-label" style="color:#1D4ED8">How files are organised</div>
+        <div style="font-size:13px;color:var(--ink2);line-height:1.9;font-family:var(--font-mono)">
+          <div id="folder-tree-preview">
+            📁 <span style="color:var(--ink3)">Your chosen folder</span><br/>
+            &nbsp;&nbsp;&nbsp;├── 📄 kitchen-data.json &nbsp;<span style="color:var(--ink3);font-family:var(--font-body)">(shared transaction data)</span><br/>
+            &nbsp;&nbsp;&nbsp;├── 📁 2026-06/<br/>
+            &nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;├── 🧾 2026-06-12_invoice.pdf<br/>
+            &nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└── 🧾 2026-06-28_receipt.jpg<br/>
+            &nbsp;&nbsp;&nbsp;└── 📁 2026-07/<br/>
+            &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 🧾 2026-07-03_thuisbezorgd.pdf
+          </div>
+        </div>
+      </div>
+
+      <!-- Shared access tip -->
+      <div class="card" style="border-color:rgba(109,40,217,0.15);background:#FDFCFF">
+        <div class="card-label" style="color:#6D28D9">🤝 Sharing with your wife</div>
+        <ol style="font-size:13px;color:var(--ink2);line-height:2;padding-left:18px">
+          <li>Create a folder in Google Drive (e.g. <strong>Kitchen Books</strong>)</li>
+          <li>Right-click → Share → add your wife's Google account</li>
+          <li>Both of you open the app → go to Settings → choose the <strong>same folder</strong></li>
+          <li>The app automatically reads and writes the same <code style="font-family:var(--font-mono);font-size:12px;background:rgba(109,40,217,0.08);padding:1px 5px;border-radius:4px">kitchen-data.json</code></li>
+        </ol>
+      </div>
+
+      <!-- App info -->
+      <div class="card">
+        <div class="card-label">App info</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--ink2)">Business type</span>
+            <span style="font-family:var(--font-mono)">Cloud kitchen</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--ink2)">VAT status</span>
+            <span style="font-family:var(--font-mono);color:#1D4ED8">KOR-exempt · no BTW</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border)">
+            <span style="color:var(--ink2)">Bank</span>
+            <span style="font-family:var(--font-mono)">ING (CSV import)</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;font-size:13px;padding:6px 0">
+            <span style="color:var(--ink2)">Data storage</span>
+            <span style="font-family:var(--font-mono)">Google Drive · kitchen-data.json</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Danger zone -->
+      <div class="card" style="border-color:rgba(192,57,43,0.2)">
+        <div class="card-label" style="color:var(--red)">Danger zone</div>
+        <p style="font-size:13px;color:var(--ink2);margin-bottom:14px">Clear all local data and sign out. Your data in Google Drive is not affected.</p>
+        <button class="btn btn-secondary" style="border-color:var(--red);color:var(--red)" onclick="handleSignOut()">Sign out & clear local data</button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- MOBILE BOTTOM NAV -->
+  <nav class="bottom-nav">
+    <button class="bnav-item active" id="bnav-dashboard" onclick="showPage('dashboard',this);setMobileNav('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      <span class="bnav-label">Overview</span>
+    </button>
+    <button class="bnav-item" id="bnav-transactions" onclick="showPage('transactions',this);setMobileNav('transactions')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      <span class="bnav-label">Transactions</span>
+    </button>
+    <!-- FAB Upload -->
+    <div class="bnav-fab">
+      <button class="fab-btn" onclick="showPage('quickupload',null);setMobileNav('quickupload')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12l7-7 7 7"/></svg>
+      </button>
+      <span class="fab-label">Upload</span>
+    </div>
+    <button class="bnav-item" id="bnav-receipts" onclick="showPage('receipts',this);setMobileNav('receipts')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      <span class="bnav-label">Receipts</span>
+    </button>
+    <button class="bnav-item" id="bnav-pl" onclick="showPage('pl',this);setMobileNav('pl')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <span class="bnav-label">P&amp;L</span>
+    </button>
+  </nav>
+
+</div>
+
+<!-- LINK MODAL -->
+<div class="modal-overlay" id="link-modal" style="display:none" onclick="closeModal(event)">
+  <div class="modal">
+    <h3>Link receipt</h3>
+    <p id="link-modal-desc">Choose a transaction to link to this receipt</p>
+    <div class="modal-list" id="link-modal-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary btn-sm" onclick="document.getElementById('link-modal').style.display='none'">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="confirmLink()">Link</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async></script>
+<script src="https://apis.google.com/js/api.js" async></script>
+<script>
+// ─── CONFIG ─────────────────────────────────────────
+const CLIENT_ID = '354274835745-f36h72g2th27fafmkj3i7d57kov2u8kc.apps.googleusercontent.com';
+// drive.file = upload new files; drive.appdata not enough for shared folder
+// We need drive scope to read/write the shared kitchen-data.json
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.profile';
+const DATA_FILENAME = 'kitchen-data.json';
+// ────────────────────────────────────────────────────
+
+const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue','Other revenue','Private deposit'];
+const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal'];
+const PRIVATE_CATEGORIES = ['Private deposit','Private withdrawal'];
+
+let accessToken = null;
+let transactions = [];
+let receipts = [];
+let pendingReceipts = [];
+let folderId = null, folderName = null;
+let dataFileId = null; // ID of kitchen-data.json in Drive
+let monthFolderCache = {};
+let linkingReceiptId = null, selectedTxnId = null;
+let linkingForTxn = false, _selectedReceiptForLink = null;
+let plMonth = 'all';
+let isSaving = false;
+
+const $ = id => document.getElementById(id);
+
+// ─── DRIVE DATA LAYER ────────────────────────────────
+
+// Find kitchen-data.json — searches selected folder first, then anywhere in Drive
+async function findDataFile() {
+  // Search in selected folder first
+  if (folderId) {
+    const q = encodeURIComponent(`name='${DATA_FILENAME}' and '${folderId}' in parents and trashed=false`);
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    }).then(r => r.json());
+    if (res.files?.[0]?.id) return res.files[0].id;
+  }
+  // Fallback: search anywhere in Drive (catches files created before folder was set)
+  const q2 = encodeURIComponent(`name='${DATA_FILENAME}' and trashed=false`);
+  const res2 = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q2}&fields=files(id,name,parents)&orderBy=modifiedTime desc`, {
+    headers: { Authorization: 'Bearer ' + accessToken }
+  }).then(r => r.json());
+  return res2.files?.[0]?.id || null;
+}
+
+// Load data from Drive — NEVER clears existing data if file not found
+async function loadFromDrive() {
+  showSyncStatus('loading');
+  try {
+    const foundId = await findDataFile();
+    if (!foundId) {
+      // No file found — keep whatever data is already in memory, don't wipe it
+      showSyncStatus('ready', transactions.length
+        ? `☁️ No Drive file yet — ${transactions.length} transactions in memory`
+        : 'No data file yet — will be created on first save');
+      return;
+    }
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?alt=media`, {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    });
+    if (!res.ok) {
+      showSyncStatus('error', 'Could not read data file from Drive');
+      return;
+    }
+    const data = await res.json();
+    // Only update if Drive file actually has data
+    if (data.transactions || data.receipts) {
+      dataFileId = foundId;
+      transactions = data.transactions || [];
+      receipts = data.receipts || [];
+      lastSyncTime = new Date(
+        (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
+          {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
+      ).getTime();
+      showSyncStatus('ready', `Synced · ${transactions.length} transactions · ${receipts.length} receipts`);
+    } else {
+      showSyncStatus('ready', 'Drive file is empty — keeping current data');
+    }
+  } catch(e) {
+    // On any error, keep existing data and show error — never wipe
+    showSyncStatus('error', 'Sync failed — your data is safe, check connection');
+    console.error(e);
+  }
+}
+
+// Save data to Drive (create or update kitchen-data.json)
+async function saveToDrive() {
+  if (!accessToken) return;
+  if (isSaving) return; // prevent concurrent saves
+  isSaving = true;
+  showSyncStatus('saving');
+  try {
+    const payload = JSON.stringify({ transactions, receipts, updatedAt: new Date().toISOString() });
+    const blob = new Blob([payload], { type: 'application/json' });
+
+    if (dataFileId) {
+      // Update existing file
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${dataFileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: 'Bearer ' + accessToken, 'Content-Type': 'application/json' },
+        body: blob
+      });
+    } else {
+      // Create new file
+      const meta = { name: DATA_FILENAME, mimeType: 'application/json' };
+      if (folderId) meta.parents = [folderId];
+      const form = new FormData();
+      form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+      form.append('file', blob);
+      const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + accessToken },
+        body: form
+      }).then(r => r.json());
+      dataFileId = res.id;
+    }
+    lastSyncTime = Date.now();
+    showSyncStatus('saved');
+    setTimeout(() => showSyncStatus('ready', `Saved · ${new Date().toLocaleTimeString()}`), 1500);
+  } catch(e) {
+    showSyncStatus('error', 'Save failed — check your connection');
+    console.error(e);
+  } finally {
+    isSaving = false;
+  }
+}
+
+function showSyncStatus(state, msg) {
+  const icons = { loading:'⏳', saving:'💾', saved:'✓', ready:'☁️', error:'⚠️' };
+  const colors = { loading:'var(--ink3)', saving:'var(--fire)', saved:'var(--green)', ready:'var(--ink3)', error:'var(--red)' };
+  const text = icons[state] + ' ' + (msg || { loading:'Loading from Drive…', saving:'Saving…', saved:'Saved to Drive', ready:'Synced', error:'Sync error' }[state]);
+  const el = $('sync-status');
+  if (el) { el.textContent = text; el.style.color = colors[state]; }
+  const mob = $('sync-status-mobile');
+  if (mob) { mob.textContent = text; mob.style.color = colors[state]; }
+  // Show mobile sync bar on mobile
+  const bar = $('mobile-sync-bar');
+  if (bar && window.innerWidth <= 768) bar.style.display = 'flex';
+}
+
+// Compatibility: old calls to saveTxns / saveReceipts now go to Drive
+function saveTxns() { saveToDrive(); }
+function saveReceipts() { saveToDrive(); }
+
+// ─── AUTH ────────────────────────────────────────────
+let tokenClient = null;
+
+// Called on page load — silently restores session if user was previously signed in
+function tryAutoSignIn() {
+  if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') return; // not configured yet
+  const wasSignedIn = localStorage.getItem('kb_signed_in');
+  if (!wasSignedIn) return; // user never signed in or explicitly signed out
+  const waitForGIS = () => {
+    if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: SCOPES,
+      prompt: '', // empty string = silent — no popup if session is still valid
+      callback: async r => {
+        if (r.error) {
+          // Silent sign-in failed (session expired) — show login screen
+          localStorage.removeItem('kb_signed_in');
+          $('auth-screen').style.display = 'flex';
+          return;
+        }
+        accessToken = r.access_token;
+        scheduleTokenRefresh(); // keep token alive
+        await onSignedIn();
+      }
+    });
+    // Show a brief loading state while we try silent sign-in
+    $('auth-screen').style.display = 'none'; // hide auth briefly
+    tokenClient.requestAccessToken();
+  };
+  waitForGIS();
+}
+
+// Called when user clicks Sign in button
+function handleAuth() {
+  const waitForGIS = () => {
+    if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: SCOPES,
+      callback: async r => {
+        if (r.error) {
+          $('auth-screen').style.display = 'flex';
+          alert('Sign-in failed: ' + r.error);
+          return;
+        }
+        accessToken = r.access_token;
+        localStorage.setItem('kb_signed_in', '1'); // remember that user signed in
+        scheduleTokenRefresh();
+        await onSignedIn();
+      }
+    });
+    tokenClient.requestAccessToken({ prompt: 'select_account' });
+  };
+  waitForGIS();
+}
+
+// Shared post-login setup
+async function onSignedIn() {
+  await fetchUser();
+  $('auth-screen').style.display = 'none';
+  $('app').style.display = 'grid';
+  if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') $('setup-banner').style.display = 'block';
+  loadSavedFolder();
+  await loadFromDrive();
+  refreshAll();
+  startAutoSync();
+  showSyncStatus('ready', 'Auto-sync on · every 60s');
+}
+
+// Silently refresh the OAuth token before it expires (tokens last ~1 hour)
+let tokenRefreshTimer = null;
+function scheduleTokenRefresh() {
+  if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+  // Refresh after 55 minutes (tokens expire at 60 min)
+  tokenRefreshTimer = setTimeout(() => {
+    if (!tokenClient) return;
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: SCOPES, prompt: '',
+      callback: r => {
+        if (!r.error) {
+          accessToken = r.access_token;
+          scheduleTokenRefresh(); // reschedule next refresh
+        }
+      }
+    });
+    tokenClient.requestAccessToken();
+  }, 55 * 60 * 1000);
+}
+
+async function fetchUser() {
+  const u = await fetch('https://www.googleapis.com/oauth2/v2/userinfo',{headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+  const name = u.name||u.email||'User';
+  $('user-name-side').textContent = name;
+  $('user-av').textContent = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  // Also cache name so UI shows correctly before data loads
+  localStorage.setItem('kb_user_name', name);
+}
+
+function handleSignOut() {
+  if (window.google?.accounts?.oauth2 && accessToken) google.accounts.oauth2.revoke(accessToken,()=>{});
+  if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
+  stopAutoSync();
+  // Clear session flag so auto-sign-in doesn't trigger next time
+  localStorage.removeItem('kb_signed_in');
+  localStorage.removeItem('kb_user_name');
+  accessToken=null; transactions=[]; receipts=[]; dataFileId=null; lastSyncTime=null;
+  $('auth-screen').style.display='flex';
+  $('app').style.display='none';
+}
+
+async function syncNow() {
+  // Save current data first (so nothing is lost), then reload from Drive
+  if (transactions.length > 0 || receipts.length > 0) {
+    await saveToDrive();
+  }
+  await loadFromDrive();
+  refreshAll();
+}
+
+// ─── NAVIGATION ──────────────────────────────────────
+function showPage(id, btn) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
+  $('page-'+id)?.classList.add('active');
+  if (btn) btn.classList.add('active');
+  if (id==='dashboard') renderDashboard();
+  if (id==='transactions') renderTransactions();
+  if (id==='receipts') renderReceipts();
+  if (id==='pl') renderPL();
+  if (id==='quickupload') renderQuickUpload();
+  if (id==='settings') renderSettings();
+}
+
+function setMobileNav(id) {
+  document.querySelectorAll('.bnav-item').forEach(b=>b.classList.remove('active'));
+  const el = $('bnav-'+id);
+  if (el) el.classList.add('active');
+}
+
+// ─── ING CSV ─────────────────────────────────────────
+function importING(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    Papa.parse(e.target.result, {
+      delimiter:';', header:true, skipEmptyLines:true, quoteChar:'"',
+      complete: r => {
+        if (!r.data.length) { alert('No transactions found. Check this is an ING CSV export.'); return; }
+        const rows=r.data, sample=rows[0];
+        const keys = Object.keys(sample);
+
+        // Detect column names — supports both English and Dutch ING exports
+        const dateKey = keys.find(k => k.trim().match(/^Date$|^Datum$/i)) || keys[0];
+        const descKey = keys.find(k => k.trim().match(/^Name\s*\/\s*Description$|^Naam\s*[/\/]\s*Omschrijving$|^Naam$/i));
+        const amtKey  = keys.find(k => k.trim().match(/^Amount\s*\(EUR\)$|^Bedrag\s*\(EUR\)$/i));
+        const dirKey  = keys.find(k => k.trim().match(/^Debit\/credit$|^Af\s*Bij$|^Bij\/Af$/i));
+
+        if (!amtKey || !dirKey) {
+          alert('Could not detect ING CSV columns.\n\nFound columns: ' + keys.join(', ') + '\n\nPlease make sure you are uploading an ING transaction export (CSV).');
+          input.value=''; return;
+        }
+
+        let added=0, skipped=0;
+        for (const row of rows) {
+          // Amount: strip thousands separator (.) and replace decimal comma
+          const rawAmt=(row[amtKey]||'').trim().replace(/\./g,'').replace(',','.');
+          const amt=parseFloat(rawAmt); if(isNaN(amt)||amt===0) continue;
+
+          const dir=(row[dirKey]||'').trim().toLowerCase();
+          const isIn = dir==='credit'||dir==='bij';
+
+          // Date: handle YYYYMMDD and DD-MM-YYYY and YYYY-MM-DD
+          const rawDate=(row[dateKey]||'').trim();
+          let dateStr=rawDate;
+          if(/^\d{8}$/.test(rawDate)) {
+            dateStr=rawDate.slice(0,4)+'-'+rawDate.slice(4,6)+'-'+rawDate.slice(6,8);
+          } else if(/^\d{2}-\d{2}-\d{4}$/.test(rawDate)) {
+            const[d,m,y]=rawDate.split('-'); dateStr=y+'-'+m+'-'+d;
+          }
+
+          const desc=(descKey ? row[descKey] : '') || row['Name / Description'] || row['Naam / Omschrijving'] || row['Naam'] || '';
+          const descClean = desc.trim();
+
+          const id='txn_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+          // Duplicate check: same date + amount + description
+          if(transactions.some(t=>t.date===dateStr&&t.amount===amt&&t.desc===descClean)){skipped++;continue;}
+          transactions.push({
+            id, date:dateStr, desc:descClean, amount:amt,
+            type:isIn?'in':'out',
+            category:isIn?CATEGORIES_IN[0]:CATEGORIES_OUT[0],
+            receiptId:null
+          });
+          added++;
+        }
+        saveTxns(); renderTransactions(); renderDashboard();
+        const msg = added+' transactions imported'+(skipped>0?` · ${skipped} duplicates skipped`:'');
+        alert(msg);
+        input.value='';
+      },
+      error:(err)=>alert('Error reading CSV: '+err.message)
+    });
+  };
+  // Try UTF-8 first (English ING export), fall back handled by PapaParse
+  reader.readAsText(file, 'UTF-8');
+}
+
+function saveTxns(){localStorage.setItem('txns',JSON.stringify(transactions));}
+
+// ─── TRANSACTIONS ────────────────────────────────────
+function renderTransactions() {
+  const search=($('search-txn')?.value||'').toLowerCase();
+  const typeF=$('filter-type')?.value||'';
+  const monthF=$('filter-month')?.value||'';
+  const catF=$('filter-cat')?.value||'';
+  const months=[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort().reverse();
+  const mSel=$('filter-month');
+  if(mSel){const cur=mSel.value;mSel.innerHTML='<option value="">All months</option>'+months.map(m=>`<option value="${m}"${m===cur?' selected':''}>${fmtMonth(m)}</option>`).join('');}
+  const catSel=$('filter-cat');
+  if(catSel){const curCat=catSel.value;const cats=[...new Set(transactions.map(t=>t.category))].sort();catSel.innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${c}"${c===curCat?' selected':''}>${c}</option>`).join('');}
+  let filtered=transactions.filter(t=>{
+    if(typeF&&t.type!==typeF)return false;
+    if(monthF&&!t.date.startsWith(monthF))return false;
+    if(catF&&t.category!==catF)return false;
+    if(search&&!t.desc.toLowerCase().includes(search)&&!t.category.toLowerCase().includes(search))return false;
+    return true;
+  }).sort((a,b)=>b.date.localeCompare(a.date));
+  const wrap=$('txn-table-wrap');
+  if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
+  wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
+    const linked=receipts.find(r=>r.id===t.receiptId);
+    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+
+function updateCat(id,cat){const t=transactions.find(t=>t.id===id);if(t){t.category=cat;saveTxns();renderDashboard();}}
+
+// ─── DASHBOARD ───────────────────────────────────────
+const isPrivate = t => PRIVATE_CATEGORIES.includes(t.category);
+function renderDashboard() {
+  // Exclude private deposits/withdrawals from all P&L figures
+  const income =transactions.filter(t=>t.type==='in' &&!isPrivate(t)).reduce((s,t)=>s+t.amount,0);
+  const expense=transactions.filter(t=>t.type==='out'&&!isPrivate(t)).reduce((s,t)=>s+t.amount,0);
+  const profit=income-expense;
+  const linked=receipts.filter(r=>transactions.some(t=>t.receiptId===r.id)).length;
+  $('stat-income').textContent=fmtEur(income,true);
+  $('stat-income-sub').textContent=transactions.filter(t=>t.type==='in'&&!isPrivate(t)).length+' transactions';
+  $('stat-expense').textContent=fmtEur(expense,true);
+  $('stat-expense-sub').textContent=transactions.filter(t=>t.type==='out'&&!isPrivate(t)).length+' transactions';
+  $('stat-profit').textContent=fmtEur(profit,true);
+  $('stat-receipts').textContent=receipts.length;
+  $('stat-receipts-linked').textContent=linked+' linked';
+  // Mobile stats
+  if($('m-stat-income')){$('m-stat-income').textContent=fmtEur(income,true);$('m-stat-expense').textContent=fmtEur(expense,true);$('m-stat-profit').textContent=fmtEur(profit,true);$('m-stat-receipts').textContent=receipts.length;}
+  const months=[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort();
+  const chart=$('bar-chart');
+  if(!months.length){chart.innerHTML='<div class="empty" style="padding:1rem;flex:1"><p>No data yet</p></div>';return;}
+  const maxVal=Math.max(...months.map(m=>{const i=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);const e=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);return Math.max(i,e);}),1);
+  chart.innerHTML=months.map(m=>{
+    const inc=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const exp=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const ih=Math.max(Math.round((inc/maxVal)*110),2);const eh=Math.max(Math.round((exp/maxVal)*110),2);
+    return`<div class="bar-group"><div class="bar-wrap"><div class="bar income-bar" style="height:${ih}px" title="Revenue ${fmtEur(inc,true)}"></div><div class="bar expense-bar" style="height:${eh}px" title="Expenses ${fmtEur(exp,true)}"></div></div><div class="bar-label">${m.slice(5)}</div></div>`;
+  }).join('');
+  const recent=[...transactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  $('recent-txn-list').innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${recent.map(t=>`<tr><td style="font-family:var(--font-mono);font-size:12px">${t.date}</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><span class="badge ${isPrivate(t)?'badge-private':'badge-cat'}">${esc(t.category)}</span></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:1.5rem"><p>Import your bank statement to get started</p></div>';
+}
+
+// ─── P&L ─────────────────────────────────────────────
+function renderPL() {
+  const months=['all',...[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort()];
+  $('pl-months').innerHTML=months.map(m=>`<button class="month-tab${m===plMonth?' active':''}" onclick="setPLMonth('${m}',this)">${m==='all'?'Full year':fmtMonth(m)}</button>`).join('');
+  const all=plMonth==='all'?transactions:transactions.filter(t=>t.date.startsWith(plMonth));
+  // Exclude private categories from P&L
+  const filtered=all.filter(t=>!isPrivate(t));
+  const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
+  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+  $('pl-income').textContent=fmtEur(income,true);$('pl-expense').textContent=fmtEur(expense,true);$('pl-profit').textContent=fmtEur(income-expense,true);
+  const byCat=(type,container)=>{
+    const cats={};
+    filtered.filter(t=>t.type===type).forEach(t=>{cats[t.category]=(cats[t.category]||0)+t.amount;});
+    const total=Object.values(cats).reduce((s,v)=>s+v,0)||1;
+    const rows=Object.entries(cats).sort((a,b)=>b[1]-a[1]);
+    $(container).innerHTML=rows.length?rows.map(([cat,val])=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1;font-size:13px">${esc(cat)}</div><div style="width:80px;height:6px;background:var(--paper2);border-radius:3px;overflow:hidden;flex-shrink:0"><div style="height:100%;width:${Math.round(val/total*100)}%;background:${type==='in'?'var(--green)':'var(--red)'};border-radius:3px"></div></div><div style="font-family:var(--font-mono);font-size:13px;min-width:80px;text-align:right;color:${type==='in'?'var(--green)':'var(--red)'}">${fmtEur(val,true)}</div></div>`).join(''):'<div class="empty" style="padding:1rem"><p>No data for this period</p></div>';
+  };
+  byCat('in','pl-income-cats');byCat('out','pl-expense-cats');
+  // Show private transfers separately
+  const privateRows=all.filter(t=>isPrivate(t));
+  const privTotal=privateRows.reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),0);
+  const privEl=$('pl-private');
+  if(privEl){
+    privEl.innerHTML=privateRows.length?`<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;color:var(--ink2)">Private transfers (${privateRows.length} transactions · not in P&L)</span><span style="font-family:var(--font-mono);font-size:13px;color:var(--ink3)">${privTotal>=0?'+':''}${fmtEur(Math.abs(privTotal),true)}</span></div>`:'<p style="font-size:13px;color:var(--ink3)">No private transfers</p>';
+  }
+}
+
+function setPLMonth(m,btn){plMonth=m;document.querySelectorAll('.month-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPL();}
+
+function exportCSV(){
+  const filtered=plMonth==='all'?transactions:transactions.filter(t=>t.date.startsWith(plMonth));
+  const rows=[['Date','Description','Category','Type','Amount']];
+  filtered.sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{rows.push([t.date,t.desc,t.category,t.type==='in'?'Revenue':'Expense',(t.type==='out'?'-':'')+t.amount.toFixed(2)]);});
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');a.href=url;a.download=`kitchen-books${plMonth!=='all'?'_'+plMonth:''}.csv`;a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ─── RECEIPTS ────────────────────────────────────────
+function renderReceipts() {
+  // Pending queue
+  const list=$('receipt-list');
+  list.innerHTML=pendingReceipts.map(r=>{
+    const tag={pending:'Ready',uploading:'Uploading…',done:'Done',error:'Error'}[r.status];
+    const tc={pending:'tag-ready',uploading:'tag-uploading',done:'tag-done',error:'tag-error'}[r.status];
+    return`<div class="receipt-item"><div class="receipt-icon">${r.file.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-info"><div class="receipt-name">${esc(r.file.name)}</div><div class="receipt-meta">${fmtSize(r.file.size)}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div><span class="receipt-tag ${tc}">${tag}</span>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`;
+  }).join('');
+  $('upload-receipts-btn').disabled=!pendingReceipts.filter(r=>r.status==='pending').length;
+
+  // Uploaded — desktop table
+  const dsk=$('uploaded-receipts-desktop');
+  if(!receipts.length){
+    dsk.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
+  } else {
+    dsk.innerHTML=`<table><thead><tr><th>File</th><th>Date</th><th>Linked to</th><th>Action</th></tr></thead><tbody>${receipts.map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<tr><td><a href="${r.url}" target="_blank" style="color:var(--fire);font-size:13px">${esc(r.name)}</a></td><td style="font-size:12px;font-family:var(--font-mono)">${r.date}</td><td>${lt?`<span class="badge badge-linked">${esc(lt.desc.slice(0,18))}…</span>`:'<span style="color:var(--ink3)">—</span>'}</td><td><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">Link</button></td></tr>`;}).join('')}</tbody></table>`;
+  }
+
+  // Uploaded — mobile cards
+  const mob=$('uploaded-receipts-mobile');
+  if(!receipts.length){
+    mob.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
+  } else {
+    mob.innerHTML=receipts.map(r=>{
+      const lt=transactions.find(t=>t.receiptId===r.id);
+      return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${lt?' · '+esc(lt.desc.slice(0,20)):' · Not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link txn'}</button></div></div></div>`;
+    }).join('');
+  }
+
+  renderQuickUpload();
+}
+
+// ─── QUICK UPLOAD (mobile) ───────────────────────────
+function renderQuickUpload() {
+  // Sync folder name
+  if($('qu-folder-name')&&folderName){$('qu-folder-name').value=folderName;$('qu-folder-hint').textContent='Selected: '+folderName;}
+  // Queue
+  const queue=$('qu-queue');
+  const qList=$('qu-queue-list');
+  const pending=pendingReceipts.filter(r=>r.status==='pending'||r.status==='uploading');
+  if(pending.length){
+    queue.style.display='block';
+    qList.innerHTML=pending.map(r=>`<div class="qu-item"><div class="qu-item-thumb">${r.file.type.startsWith('image/')?`<img src="${URL.createObjectURL(r.file)}"/>`:r.file.name.match(/\.pdf$/i)?'📄':'📁'}</div><div class="qu-item-info"><div class="qu-item-name">${esc(r.file.name)}</div><div class="qu-item-meta">${fmtSize(r.file.size)}${r.status==='uploading'?` · ${r.progress}%`:''}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`).join('');
+  } else { queue.style.display='none'; }
+  const btn=$('qu-upload-btn');
+  if(btn) btn.disabled=!pendingReceipts.filter(r=>r.status==='pending').length;
+  // Recent
+  const recent=$('qu-recent-list');
+  if(recent){
+    if(!receipts.length){recent.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--ink3);font-size:13px">No receipts yet</div>';}
+    else{recent.innerHTML=receipts.slice().reverse().slice(0,5).map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${lt?' · linked':' · not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link'}</button></div></div></div>`;}).join('');}
+  }
+}
+
+function addReceiptsQU(files){addReceipts(files);renderQuickUpload();}
+
+function addReceipts(files){
+  for(const f of files){
+    if(f.size>20*1024*1024){alert(f.name+' exceeds 20 MB limit');continue;}
+    pendingReceipts.push({id:'pr_'+Math.random().toString(36).slice(2),file:f,status:'pending',progress:0});
+  }
+  renderReceipts();
+}
+
+function removePending(id){pendingReceipts=pendingReceipts.filter(r=>r.id!==id);renderReceipts();}
+function clearDoneReceipts(){pendingReceipts=pendingReceipts.filter(r=>r.status!=='done');renderReceipts();}
+
+async function uploadAllReceipts(fromQuick=false){
+  if(!accessToken){alert('Please sign in first.');return;}
+  const pending=pendingReceipts.filter(r=>r.status==='pending');
+  for(const r of pending) await uploadReceipt(r);
+  saveReceipts();renderReceipts();
+}
+
+async function uploadReceipt(entry){
+  entry.status='uploading';entry.progress=0;renderReceipts();renderQuickUpload();
+  let targetId=folderId;
+  if(folderId){try{targetId=await getOrCreateMonthFolder(folderId);}catch(e){}}
+  const ds=new Date().toISOString().slice(0,10);
+  const newName=ds+'_'+entry.file.name;
+  const meta={name:newName,mimeType:entry.file.type||'application/octet-stream'};
+  if(targetId)meta.parents=[targetId];
+  const form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+  form.append('file',entry.file);
+  await new Promise(resolve=>{
+    const xhr=new XMLHttpRequest();
+    xhr.open('POST','https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink');
+    xhr.setRequestHeader('Authorization','Bearer '+accessToken);
+    xhr.upload.onprogress=e=>{if(e.lengthComputable){entry.progress=Math.round(e.loaded/e.total*100);renderReceipts();renderQuickUpload();}};
+    xhr.onload=()=>{
+      if(xhr.status===200){const resp=JSON.parse(xhr.responseText);entry.status='done';receipts.push({id:entry.id,name:newName,url:resp.webViewLink,date:ds,driveId:resp.id});saveReceipts();}
+      else{entry.status='error';}
+      resolve();
+    };
+    xhr.onerror=()=>{entry.status='error';resolve();};
+    xhr.send(form);
+  });
+}
+
+function saveReceipts(){localStorage.setItem('receipts_meta',JSON.stringify(receipts));}
+
+// ─── LINKING ─────────────────────────────────────────
+function openLinkForReceipt(receiptId){
+  linkingReceiptId=receiptId;linkingForTxn=false;selectedTxnId=null;
+  const r=receipts.find(r=>r.id===receiptId);
+  $('link-modal-desc').textContent=`Choose a transaction for "${r?.name||'receipt'}"`;
+  $('link-modal-list').innerHTML=transactions.slice().sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div class="modal-item" onclick="selectTxn('${t.id}',this)"><span style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${t.date}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;padding:0 8px">${esc(t.desc)}</span><span class="${t.type==='in'?'amount-in':'amount-out'}" style="font-family:var(--font-mono);font-size:12px">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></div>`).join('')||'<p style="padding:1rem;color:var(--ink3);font-size:13px">No transactions yet. Import your CSV first.</p>';
+  $('link-modal').style.display='flex';
+}
+
+function openLinkForTxn(txnId){
+  linkingReceiptId=null;linkingForTxn=true;selectedTxnId=txnId;_selectedReceiptForLink=null;
+  const t=transactions.find(t=>t.id===txnId);
+  $('link-modal-desc').textContent=`Choose a receipt for "${t?.desc?.slice(0,30)||'transaction'}"`;
+  $('link-modal-list').innerHTML=receipts.map(r=>`<div class="modal-item" onclick="selectReceipt('${r.id}',this)"><span style="font-size:16px">📄</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;padding:0 8px">${esc(r.name)}</span><span style="font-family:var(--font-mono);font-size:11px">${r.date}</span><a href="${r.url}" target="_blank" style="font-size:11px;color:var(--fire);flex-shrink:0" onclick="event.stopPropagation()">View ↗</a></div>`).join('')||'<p style="padding:1rem;color:var(--ink3);font-size:13px">No receipts yet. Upload receipts first.</p>';
+  $('link-modal').style.display='flex';
+}
+
+function selectTxn(id,el){document.querySelectorAll('.modal-item').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');selectedTxnId=id;}
+function selectReceipt(id,el){document.querySelectorAll('.modal-item').forEach(e=>e.classList.remove('selected'));el.classList.add('selected');_selectedReceiptForLink=id;}
+
+function confirmLink(){
+  if(linkingForTxn){
+    if(!_selectedReceiptForLink){alert('Please select a receipt.');return;}
+    const t=transactions.find(t=>t.id===selectedTxnId);if(t){t.receiptId=_selectedReceiptForLink;saveTxns();}
+  } else {
+    if(!selectedTxnId){alert('Please select a transaction.');return;}
+    const t=transactions.find(t=>t.id===selectedTxnId);if(t){t.receiptId=linkingReceiptId;saveTxns();}
+  }
+  $('link-modal').style.display='none';
+  renderTransactions();renderReceipts();renderDashboard();
+}
+
+function closeModal(e){if(e.target.id==='link-modal')$('link-modal').style.display='none';}
+
+// ─── GOOGLE DRIVE ────────────────────────────────────
+function pickFolder(){ pickFolderFromSettings(); }
+function pickFolderFromSettings(){
+  if(!accessToken){alert('Please sign in first.');return;}
+  const tryPicker=()=>{if(!window.gapi?.picker){gapi.load('picker',openPicker);return;}openPicker();};
+  if(!window.gapi){setTimeout(tryPicker,400);}else{tryPicker();}
+}
+function openPicker(){
+  const view=new google.picker.DocsView(google.picker.ViewId.FOLDERS).setSelectFolderEnabled(true).setMimeTypes('application/vnd.google-apps.folder');
+  new google.picker.PickerBuilder().addView(view).setOAuthToken(accessToken).setCallback(async d=>{
+    if(d.action===google.picker.Action.PICKED){
+      folderId=d.docs[0].id; folderName=d.docs[0].name;
+      // Persist so it survives page reload
+      localStorage.setItem('kb_folderId', folderId);
+      localStorage.setItem('kb_folderName', folderName);
+      monthFolderCache={}; dataFileId=null;
+      applyFolderToUI();
+      renderSettings();
+      await loadFromDrive();
+      refreshAll();
+    }
+  }).build().setVisible(true);
+}
+function applyFolderToUI(){
+  if($('folder-name-r')) $('folder-name-r').value = folderName||'';
+  if($('folder-hint-r')) $('folder-hint-r').textContent = folderName?'Selected: '+folderName:'Files go to Drive root.';
+  if($('qu-folder-name')) $('qu-folder-name').value = folderName||'';
+  if($('qu-folder-hint')) $('qu-folder-hint').textContent = folderName?'Selected: '+folderName:'Files go to Drive root if none selected.';
+}
+function clearFolder(){
+  if(!confirm('Clear the selected folder? Your Drive data is not deleted.')) return;
+  folderId=null; folderName=null;
+  localStorage.removeItem('kb_folderId'); localStorage.removeItem('kb_folderName');
+  dataFileId=null; monthFolderCache={};
+  applyFolderToUI(); renderSettings();
+}
+function loadSavedFolder(){
+  const savedId=localStorage.getItem('kb_folderId');
+  const savedName=localStorage.getItem('kb_folderName');
+  if(savedId&&savedName){ folderId=savedId; folderName=savedName; applyFolderToUI(); }
+}
+function renderSettings(){
+  const nameEl=$('settings-folder-name');
+  const idEl=$('settings-folder-id');
+  const badge=$('settings-folder-badge');
+  const clearBtn=$('settings-clear-btn');
+  if(!nameEl) return;
+  if(folderName&&folderId){
+    nameEl.textContent=folderName;
+    idEl.textContent='ID: '+folderId;
+    if(badge) badge.style.display='inline-block';
+    if(clearBtn) clearBtn.style.display='inline-flex';
+    if($('settings-folder-hint')) $('settings-folder-hint').textContent='✓ kitchen-data.json and receipts will be saved here';
+    const tree=$('folder-tree-preview');
+    if(tree){
+      const mo=new Date().toISOString().slice(0,7);
+      const prevN=String(parseInt(mo.slice(5))-1).padStart(2,'0');
+      const prevMo=mo.slice(0,5)+prevN;
+      tree.innerHTML='📁 <strong>'+esc(folderName)+'</strong><br/>&nbsp;&nbsp;&nbsp;├── 📄 kitchen-data.json &nbsp;<span style="color:var(--ink3);font-family:var(--font-body)">(shared transaction data)</span><br/>&nbsp;&nbsp;&nbsp;├── 📁 '+prevMo+'/<br/>&nbsp;&nbsp;&nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└── 🧾 '+prevMo+'-15_receipt.pdf<br/>&nbsp;&nbsp;&nbsp;└── 📁 '+mo+'/<br/>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└── 🧾 '+mo+'-03_invoice.pdf';
+    }
+  } else {
+    nameEl.textContent='No folder selected';
+    idEl.textContent='Choose a folder to get started';
+    if(badge) badge.style.display='none';
+    if(clearBtn) clearBtn.style.display='none';
+    if($('settings-folder-hint')) $('settings-folder-hint').textContent='Without a folder, receipts go to Drive root and data may not sync between users.';
+  }
+}
+
+async function getOrCreateMonthFolder(parentId){
+  const m=new Date().toISOString().slice(0,7);
+  if(monthFolderCache[m])return monthFolderCache[m];
+  const q=encodeURIComponent(`name='${m}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentId?` and '${parentId}' in parents`:''}`);
+  const res=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,{headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+  if(res.files?.length){monthFolderCache[m]=res.files[0].id;return res.files[0].id;}
+  const meta={name:m,mimeType:'application/vnd.google-apps.folder'};if(parentId)meta.parents=[parentId];
+  const cr=await fetch('https://www.googleapis.com/drive/v3/files',{method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:JSON.stringify(meta)}).then(r=>r.json());
+  monthFolderCache[m]=cr.id;return cr.id;
+}
+
+// ─── DRAG & DROP ─────────────────────────────────────
+function onDragOver(e,id){e.preventDefault();$(id)?.classList.add('drag-over')}
+function onDragLeave(id){$(id)?.classList.remove('drag-over')}
+function onDropReceipt(e){e.preventDefault();onDragLeave('drop-zone-r');addReceipts(e.dataTransfer.files)}
+
+// ─── UTILS ───────────────────────────────────────────
+function fmtEur(n,prefix=false){return(prefix?'€ ':'')+Math.abs(n).toLocaleString('en-EU',{minimumFractionDigits:2,maximumFractionDigits:2})}
+function fmtMonth(m){const[y,mo]=m.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]+' '+y}
+function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
+function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();}
+
+// ─── AUTO SYNC ───────────────────────────────────────
+let autoSyncInterval = null;
+
+function startAutoSync() {
+  // Poll every 60 seconds — pull latest from Drive silently
+  if (autoSyncInterval) clearInterval(autoSyncInterval);
+  autoSyncInterval = setInterval(async () => {
+    if (!accessToken) return;
+    try {
+      const foundId = await findDataFile();
+      if (!foundId) return;
+      // Only reload if Drive file is newer than what we have
+      const meta = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
+        { headers: { Authorization: 'Bearer ' + accessToken } }
+      ).then(r => r.json());
+      const driveTime = new Date(meta.modifiedTime).getTime();
+      if (!lastSyncTime || driveTime > lastSyncTime) {
+        const res = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${foundId}?alt=media`,
+          { headers: { Authorization: 'Bearer ' + accessToken } }
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.transactions || data.receipts) {
+          dataFileId = foundId;
+          transactions = data.transactions || [];
+          receipts = data.receipts || [];
+          lastSyncTime = driveTime;
+          refreshAll();
+          showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
+          setTimeout(() => showSyncStatus('ready', 'Auto-sync on'), 2000);
+        }
+      }
+    } catch(e) { /* silent fail on auto-sync */ }
+  }, 60000); // every 60 seconds
+}
+
+function stopAutoSync() {
+  if (autoSyncInterval) { clearInterval(autoSyncInterval); autoSyncInterval = null; }
+}
+
+// Track last sync time to detect changes
+let lastSyncTime = null;
+
+// ─── BOOT ────────────────────────────────────────────
+// On page load: show cached user name immediately, then silently restore session
+window.addEventListener('load', () => {
+  const cachedName = localStorage.getItem('kb_user_name');
+  if (cachedName && localStorage.getItem('kb_signed_in')) {
+    // Show app shell instantly with cached name while silent auth runs
+    $('user-name-side').textContent = cachedName;
+    $('user-av').textContent = cachedName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    $('auth-screen').style.display = 'none';
+    $('app').style.display = 'grid';
+    showSyncStatus('loading');
+  }
+  tryAutoSignIn();
+});
+</script>
+</body>
+</html>
