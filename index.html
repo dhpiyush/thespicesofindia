@@ -1219,17 +1219,33 @@ function importMoneybird(input) {
         const isIn = amt > 0;
         const absAmt = Math.abs(amt);
 
-        // Parse date — comes as string 'YYYY-MM-DD' with cellDates+dateNF
+        // Parse date robustly — Excel can give serial numbers, M/D/YY, or YYYY-MM-DD
         let dateStr = '';
         const rawDate = row['Date'] || row['Value date'] || '';
-        if (typeof rawDate === 'string' && rawDate.match(/^\d{4}-\d{2}-\d{2}/)) {
-          dateStr = rawDate.slice(0, 10);
-        } else if (typeof rawDate === 'number') {
-          // Excel serial date
+        if (typeof rawDate === 'number') {
+          // Excel serial date (days since 1900-01-01)
           const d = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
           dateStr = d.toISOString().slice(0, 10);
         } else {
-          dateStr = String(rawDate).slice(0, 10);
+          const s = String(rawDate).trim();
+          if (s.match(/^\d{4}-\d{2}-\d{2}/)) {
+            // Already YYYY-MM-DD
+            dateStr = s.slice(0, 10);
+          } else if (s.match(/^\d{1,2}\/\d{1,2}\/\d{2,4}$/)) {
+            // M/D/YY or M/D/YYYY (Excel US format)
+            const parts = s.split('/');
+            const m = parts[0].padStart(2,'0');
+            const d = parts[1].padStart(2,'0');
+            let y = parts[2];
+            if (y.length === 2) y = (parseInt(y) < 50 ? '20' : '19') + y;
+            dateStr = y + '-' + m + '-' + d;
+          } else if (s.match(/^\d{2}-\d{2}-\d{4}$/)) {
+            // DD-MM-YYYY (Dutch format)
+            const [dd,mm,yyyy] = s.split('-');
+            dateStr = yyyy + '-' + mm + '-' + dd;
+          } else {
+            dateStr = s.slice(0, 10);
+          }
         }
 
         const desc = (row['Description'] || '').trim();
@@ -1286,7 +1302,10 @@ function renderTransactions() {
   const typeF=$('filter-type')?.value||'';
   const monthF=$('filter-month')?.value||'';
   const catF=$('filter-cat')?.value||'';
-  const months=[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort().reverse();
+  const months=[...new Set(transactions
+    .map(t=>t.date ? t.date.slice(0,7) : null)
+    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
+  )].sort().reverse();
   const mSel=$('filter-month');
   if(mSel){const cur=mSel.value;mSel.innerHTML='<option value="">All months</option>'+months.map(m=>`<option value="${m}"${m===cur?' selected':''}>${fmtMonth(m)}</option>`).join('');}
   const catSel=$('filter-cat');
@@ -1325,7 +1344,10 @@ function renderDashboard() {
   $('stat-receipts-linked').textContent=linked+' linked';
   // Mobile stats
   if($('m-stat-income')){$('m-stat-income').textContent=fmtEur(income,true);$('m-stat-expense').textContent=fmtEur(expense,true);$('m-stat-profit').textContent=fmtEur(profit,true);$('m-stat-receipts').textContent=receipts.length;}
-  const months=[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort();
+  const months=[...new Set(transactions
+    .map(t=>t.date ? t.date.slice(0,7) : null)
+    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
+  )].sort();
   const chart=$('bar-chart');
   if(!months.length){chart.innerHTML='<div class="empty" style="padding:1rem;flex:1"><p>No data yet</p></div>';return;}
   const maxVal=Math.max(...months.map(m=>{const i=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);const e=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);return Math.max(i,e);}),1);
@@ -1341,9 +1363,13 @@ function renderDashboard() {
 
 // ─── P&L ─────────────────────────────────────────────
 function renderPL() {
-  const months=['all',...[...new Set(transactions.map(t=>t.date.slice(0,7)))].sort()];
+  // Group by YYYY-MM, filter out any bad dates, sort chronologically
+  const months=['all',...[...new Set(transactions
+    .map(t=>t.date ? t.date.slice(0,7) : null)
+    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
+  )].sort()];
   $('pl-months').innerHTML=months.map(m=>`<button class="month-tab${m===plMonth?' active':''}" onclick="setPLMonth('${m}',this)">${m==='all'?'Full year':fmtMonth(m)}</button>`).join('');
-  const all=plMonth==='all'?transactions:transactions.filter(t=>t.date.startsWith(plMonth));
+  const all=plMonth==='all'?transactions:transactions.filter(t=>t.date && t.date.startsWith(plMonth));
   // Exclude private categories from P&L
   const filtered=all.filter(t=>!isPrivate(t));
   const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
@@ -1606,7 +1632,15 @@ function onDropReceipt(e){e.preventDefault();onDragLeave('drop-zone-r');addRecei
 
 // ─── UTILS ───────────────────────────────────────────
 function fmtEur(n,prefix=false){return(prefix?'€ ':'')+Math.abs(n).toLocaleString('en-EU',{minimumFractionDigits:2,maximumFractionDigits:2})}
-function fmtMonth(m){const[y,mo]=m.split('-');return['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]+' '+y}
+function fmtMonth(m){
+  if (!m) return '?';
+  // Handle YYYY-MM (standard)
+  if (/^\d{4}-\d{2}$/.test(m)) {
+    const [y,mo]=m.split('-');
+    return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo)-1]+' '+y;
+  }
+  return m; // fallback: show raw
+}
 function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
 function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();}
@@ -1659,8 +1693,31 @@ let lastSyncTime = null;
 // ─── BOOT ────────────────────────────────────────────
 // On page load: show cached user name immediately, then silently restore session
 window.addEventListener('load', () => {
+  fixLegacyDates(); // migrate any M/D/YY dates to YYYY-MM-DD
   tryAutoSignIn(); // show returning-user UI or fresh sign-in
 });
+
+// One-time migration: fix dates stored in bad format (M/D/YY → YYYY-MM-DD)
+function fixLegacyDates() {
+  let fixed = 0;
+  transactions = transactions.map(t => {
+    const d = t.date || '';
+    if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(d)) {
+      const parts = d.split('/');
+      const m = parts[0].padStart(2,'0');
+      const day = parts[1].padStart(2,'0');
+      let y = parts[2];
+      if (y.length === 2) y = (parseInt(y) < 50 ? '20' : '19') + y;
+      fixed++;
+      return {...t, date: y + '-' + m + '-' + day};
+    }
+    return t;
+  });
+  if (fixed > 0) {
+    console.log('Fixed ' + fixed + ' legacy date formats');
+    saveTxns();
+  }
+}
 </script>
 </body>
 </html>
