@@ -11,6 +11,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700&family=DM+Mono:wght@400;500&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap" rel="stylesheet"/>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
@@ -551,11 +552,18 @@ select.filter-input{cursor:pointer}
             <h2>Transactions</h2>
             <p>Import your ING bank statement (CSV)</p>
           </div>
-          <label class="btn btn-fire" style="cursor:pointer">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            Import ING CSV
-            <input type="file" accept=".csv" onchange="importING(this)"/>
-          </label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <label class="btn btn-fire" style="cursor:pointer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Import ING CSV
+              <input type="file" accept=".csv" onchange="importING(this)"/>
+            </label>
+            <label class="btn btn-secondary" style="cursor:pointer;border-color:var(--border2)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/></svg>
+              Import Moneybird XLSX
+              <input type="file" accept=".xlsx,.xls" onchange="importMoneybird(this)"/>
+            </label>
+          </div>
         </div>
       </div>
       <div class="filters">
@@ -1176,6 +1184,98 @@ function importING(input) {
   };
   // Try UTF-8 first (English ING export), fall back handled by PapaParse
   reader.readAsText(file, 'UTF-8');
+}
+
+// ─── MONEYBIRD XLSX IMPORT ──────────────────────────
+// Maps Moneybird's "Linked to" category names → our app categories
+const MONEYBIRD_CAT_MAP = {
+  'Category Revenue':                      'Delivery revenue',
+  'Category Grocery':                      'Ingredients',
+  'Category Private withdrawals':          'Private withdrawal',
+  'Category Private Deposits':             'Private deposit',
+  'Category Sales costs':                  'Delivery platform',
+  'Category Business liability insurance': 'Administration',
+  'Category Cost of acquisition or production': 'Ingredients',
+  'Category Bank charges':                 'Administration',
+};
+
+function importMoneybird(input) {
+  const file = input.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const wb = XLSX.read(e.target.result, { type: 'array', cellDates: true });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { raw: false, dateNF: 'yyyy-mm-dd' });
+
+      if (!rows.length) { alert('No transactions found in this file.'); return; }
+
+      let added = 0, skipped = 0, unmapped = new Set();
+
+      for (const row of rows) {
+        // Parse amount — Moneybird uses negative for debits, positive for credits
+        const amt = parseFloat(String(row['Amount'] || '0').replace(',', '.'));
+        if (isNaN(amt) || amt === 0) continue;
+        const isIn = amt > 0;
+        const absAmt = Math.abs(amt);
+
+        // Parse date — comes as string 'YYYY-MM-DD' with cellDates+dateNF
+        let dateStr = '';
+        const rawDate = row['Date'] || row['Value date'] || '';
+        if (typeof rawDate === 'string' && rawDate.match(/^\d{4}-\d{2}-\d{2}/)) {
+          dateStr = rawDate.slice(0, 10);
+        } else if (typeof rawDate === 'number') {
+          // Excel serial date
+          const d = new Date(Math.round((rawDate - 25569) * 86400 * 1000));
+          dateStr = d.toISOString().slice(0, 10);
+        } else {
+          dateStr = String(rawDate).slice(0, 10);
+        }
+
+        const desc = (row['Description'] || '').trim();
+        const linkedTo = (row['Linked to'] || '').trim();
+
+        // Map Moneybird category to our category
+        let category;
+        if (MONEYBIRD_CAT_MAP[linkedTo]) {
+          category = MONEYBIRD_CAT_MAP[linkedTo];
+        } else if (linkedTo.startsWith('Category ')) {
+          // Unknown category — keep raw name, flag it
+          category = linkedTo.replace('Category ', '');
+          unmapped.add(linkedTo);
+        } else {
+          // No category (linked to a receipt filename/screenshot) — use default
+          category = isIn ? CATEGORIES_IN[0] : CATEGORIES_OUT[0];
+        }
+
+        // Override with private categories based on mapping
+        if (linkedTo === 'Category Private withdrawals' || linkedTo === 'Category Private Deposits') {
+          category = isIn ? 'Private deposit' : 'Private withdrawal';
+        }
+
+        // Duplicate check
+        if (transactions.some(t => t.date === dateStr && Math.abs(t.amount - absAmt) < 0.01 && t.desc === desc)) {
+          skipped++; continue;
+        }
+
+        const id = 'txn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        transactions.push({ id, date: dateStr, desc, amount: absAmt, type: isIn ? 'in' : 'out', category, receiptId: null });
+        added++;
+      }
+
+      saveTxns(); renderTransactions(); renderDashboard();
+
+      let msg = `✓ ${added} transactions imported from Moneybird`;
+      if (skipped) msg += `\n${skipped} duplicates skipped`;
+      if (unmapped.size) msg += `\n\nUnknown categories (set to default):\n${[...unmapped].join('\n')}`;
+      alert(msg);
+      input.value = '';
+    } catch(err) {
+      alert('Error reading XLSX: ' + err.message);
+      console.error(err);
+    }
+  };
+  reader.readAsArrayBuffer(file);
 }
 
 function saveTxns(){localStorage.setItem('txns',JSON.stringify(transactions));}
