@@ -1041,6 +1041,7 @@ async function onSignedIn() {
   if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') $('setup-banner').style.display = 'block';
   loadSavedFolder();
   await loadFromDrive();
+  await fixLegacyDates(); // fix any bad dates AFTER Drive data is loaded, then save back
   refreshAll();
   startAutoSync();
   showSyncStatus('ready', 'Auto-sync on · every 60s');
@@ -1096,6 +1097,7 @@ async function syncNow() {
     await saveToDrive();
   }
   await loadFromDrive();
+  await fixLegacyDates();
   refreshAll();
 }
 
@@ -1407,7 +1409,7 @@ function exportCSV(){
 
 // ─── RECEIPTS ────────────────────────────────────────
 function renderReceipts() {
-  // Pending queue
+  // ── Pending upload queue ──
   const list=$('receipt-list');
   list.innerHTML=pendingReceipts.map(r=>{
     const tag={pending:'Ready',uploading:'Uploading…',done:'Done',error:'Error'}[r.status];
@@ -1416,24 +1418,89 @@ function renderReceipts() {
   }).join('');
   $('upload-receipts-btn').disabled=!pendingReceipts.filter(r=>r.status==='pending').length;
 
-  // Uploaded — desktop table
-  const dsk=$('uploaded-receipts-desktop');
   if(!receipts.length){
-    dsk.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
-  } else {
-    dsk.innerHTML=`<table><thead><tr><th>File</th><th>Date</th><th>Linked to</th><th>Action</th></tr></thead><tbody>${receipts.map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<tr><td><a href="${r.url}" target="_blank" style="color:var(--fire);font-size:13px">${esc(r.name)}</a></td><td style="font-size:12px;font-family:var(--font-mono)">${r.date}</td><td>${lt?`<span class="badge badge-linked">${esc(lt.desc.slice(0,18))}…</span>`:'<span style="color:var(--ink3)">—</span>'}</td><td><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">Link</button></td></tr>`;}).join('')}</tbody></table>`;
+    const empty='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
+    $('uploaded-receipts-desktop').innerHTML=empty;
+    $('uploaded-receipts-mobile').innerHTML=empty;
+    renderQuickUpload(); return;
   }
 
-  // Uploaded — mobile cards
-  const mob=$('uploaded-receipts-mobile');
-  if(!receipts.length){
-    mob.innerHTML='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
-  } else {
-    mob.innerHTML=receipts.map(r=>{
-      const lt=transactions.find(t=>t.receiptId===r.id);
-      return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${lt?' · '+esc(lt.desc.slice(0,20)):' · Not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link txn'}</button></div></div></div>`;
-    }).join('');
+  // ── Group receipts by month ──
+  const sorted=[...receipts].sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const byMonth={};
+  for(const r of sorted){
+    const m=(r.date||'').slice(0,7)||'Unknown';
+    if(!byMonth[m]) byMonth[m]=[];
+    byMonth[m].push(r);
   }
+  const months=Object.keys(byMonth).sort().reverse();
+
+  // Summary counts
+  const unlinked=receipts.filter(r=>!transactions.some(t=>t.receiptId===r.id)).length;
+
+  // ── Desktop: month-grouped table ──
+  const dsk=$('uploaded-receipts-desktop');
+  dsk.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 0;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;color:var(--ink2)">${receipts.length} receipts total</div>
+      ${unlinked>0?`<span style="font-size:12px;font-family:var(--font-mono);background:var(--amber-light,#FFFBEB);color:var(--amber,#D97706);padding:3px 10px;border-radius:20px">⚠ ${unlinked} not linked</span>`:'<span style="font-size:12px;font-family:var(--font-mono);background:var(--green-light);color:var(--green);padding:3px 10px;border-radius:20px">✓ All linked</span>'}
+    </div>
+    ${months.map(m=>`
+      <div style="padding:10px 16px 4px;font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;border-top:1px solid var(--border);margin-top:8px">
+        ${m!=='Unknown'?fmtMonth(m):' Unknown date'} · ${byMonth[m].length} receipt${byMonth[m].length>1?'s':''}
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <tbody>
+        ${byMonth[m].map(r=>{
+          const lt=transactions.find(t=>t.receiptId===r.id);
+          const isLinked=!!lt;
+          return`<tr>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);width:32px;font-size:18px">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+              <a href="${r.url}" target="_blank" style="color:var(--fire);font-size:13px;font-weight:500">${esc(r.name)}</a>
+            </td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.date||'—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
+              ${isLinked
+                ?`<span class="badge badge-linked" title="${esc(lt.desc)}">🔗 ${esc(lt.desc.slice(0,22))}…</span>`
+                :`<span style="font-size:12px;color:var(--ink3);font-family:var(--font-mono)">Not linked</span>`}
+            </td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap">
+              <button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${isLinked?'Relink':'Link →'}</button>
+            </td>
+          </tr>`;
+        }).join('')}
+        </tbody>
+      </table>
+    `).join('')}`;
+
+  // ── Mobile: month-grouped cards ──
+  const mob=$('uploaded-receipts-mobile');
+  mob.innerHTML=`
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0 12px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:13px;color:var(--ink2)">${receipts.length} receipts total</div>
+      ${unlinked>0?`<span style="font-size:11px;font-family:var(--font-mono);background:#FFFBEB;color:#D97706;padding:3px 10px;border-radius:20px">⚠ ${unlinked} not linked</span>`:''}
+    </div>
+    ${months.map(m=>`
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;padding:8px 0 6px;border-top:1px solid var(--border);margin-top:4px">
+        ${m!=='Unknown'?fmtMonth(m):'Unknown date'} · ${byMonth[m].length} receipt${byMonth[m].length>1?'s':''}
+      </div>
+      ${byMonth[m].map(r=>{
+        const lt=transactions.find(t=>t.receiptId===r.id);
+        const isLinked=!!lt;
+        return`<div class="receipt-card" style="${isLinked?'border-color:rgba(42,122,75,0.25);background:var(--green-light)':''}">
+          <div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div>
+          <div class="receipt-card-info flex-1" style="min-width:0">
+            <div class="receipt-card-name">${esc(r.name)}</div>
+            <div class="receipt-card-meta">${r.date||''}${isLinked?' · 🔗 '+esc(lt.desc.slice(0,20)):' · not linked'}</div>
+            <div class="receipt-card-actions">
+              <a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a>
+              <button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${isLinked?'Relink':'Link →'}</button>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    `).join('')}`;
 
   renderQuickUpload();
 }
@@ -1693,29 +1760,30 @@ let lastSyncTime = null;
 // ─── BOOT ────────────────────────────────────────────
 // On page load: show cached user name immediately, then silently restore session
 window.addEventListener('load', () => {
-  fixLegacyDates(); // migrate any M/D/YY dates to YYYY-MM-DD
   tryAutoSignIn(); // show returning-user UI or fresh sign-in
 });
 
-// One-time migration: fix dates stored in bad format (M/D/YY → YYYY-MM-DD)
-function fixLegacyDates() {
+// Migration: fix dates stored in bad format (M/D/YY → YYYY-MM-DD)
+// Runs after Drive data loads and saves back if anything changed
+async function fixLegacyDates() {
   let fixed = 0;
   transactions = transactions.map(t => {
     const d = t.date || '';
+    // Fix M/D/YY or M/D/YYYY format
     if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(d)) {
       const parts = d.split('/');
-      const m = parts[0].padStart(2,'0');
+      const mo = parts[0].padStart(2,'0');
       const day = parts[1].padStart(2,'0');
       let y = parts[2];
       if (y.length === 2) y = (parseInt(y) < 50 ? '20' : '19') + y;
       fixed++;
-      return {...t, date: y + '-' + m + '-' + day};
+      return {...t, date: y + '-' + mo + '-' + day};
     }
     return t;
   });
   if (fixed > 0) {
-    console.log('Fixed ' + fixed + ' legacy date formats');
-    saveTxns();
+    console.log('Fixed ' + fixed + ' legacy date formats — saving to Drive');
+    await saveToDrive(); // persist fix back to Drive so it never happens again
   }
 }
 </script>
