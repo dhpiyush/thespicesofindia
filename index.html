@@ -1042,6 +1042,7 @@ async function onSignedIn() {
   loadSavedFolder();
   await loadFromDrive();
   await fixLegacyDates(); // fix any bad dates AFTER Drive data is loaded, then save back
+  await scanDriveForMissingReceipts(); // recover any receipts uploaded from other devices
   refreshAll();
   startAutoSync();
   showSyncStatus('ready', 'Auto-sync on · every 60s');
@@ -1098,6 +1099,7 @@ async function syncNow() {
   }
   await loadFromDrive();
   await fixLegacyDates();
+  await scanDriveForMissingReceipts();
   refreshAll();
 }
 
@@ -1573,7 +1575,7 @@ async function uploadReceipt(entry){
   });
 }
 
-function saveReceipts(){localStorage.setItem('receipts_meta',JSON.stringify(receipts));}
+// saveReceipts: defined above — saves to Drive via saveToDrive()
 
 // ─── LINKING ─────────────────────────────────────────
 function openLinkForReceipt(receiptId){
@@ -1762,6 +1764,54 @@ let lastSyncTime = null;
 window.addEventListener('load', () => {
   tryAutoSignIn(); // show returning-user UI or fresh sign-in
 });
+
+// Scan Drive folder for receipt files not yet in receipts metadata
+// This recovers files uploaded from mobile/another device
+async function scanDriveForMissingReceipts() {
+  if (!accessToken || !folderId) return;
+  try {
+    // Get all month subfolders inside the selected folder
+    const q1 = encodeURIComponent(`'${folderId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+    const foldersRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q1}&fields=files(id,name)`, {
+      headers: { Authorization: 'Bearer ' + accessToken }
+    }).then(r => r.json());
+
+    const subFolders = foldersRes.files || [];
+    // Also check root folder directly
+    const allFolderIds = [folderId, ...subFolders.map(f => f.id)];
+    const knownDriveIds = new Set(receipts.map(r => r.driveId).filter(Boolean));
+    let added = 0;
+
+    for (const fid of allFolderIds) {
+      const q2 = encodeURIComponent(`'${fid}' in parents and mimeType!='application/vnd.google-apps.folder' and name!='kitchen-data.json' and trashed=false`);
+      const filesRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q2}&fields=files(id,name,webViewLink,createdTime)&orderBy=createdTime`, {
+        headers: { Authorization: 'Bearer ' + accessToken }
+      }).then(r => r.json());
+
+      for (const file of (filesRes.files || [])) {
+        if (knownDriveIds.has(file.id)) continue; // already in metadata
+        // It's a receipt file we don't know about — add it
+        const date = file.createdTime ? file.createdTime.slice(0, 10) : new Date().toISOString().slice(0, 10);
+        receipts.push({
+          id: 'recovered_' + file.id,
+          name: file.name,
+          url: file.webViewLink,
+          date: date,
+          driveId: file.id
+        });
+        knownDriveIds.add(file.id);
+        added++;
+      }
+    }
+
+    if (added > 0) {
+      console.log(`Recovered ${added} receipts from Drive`);
+      await saveToDrive();
+    }
+  } catch(e) {
+    console.error('Drive scan failed:', e);
+  }
+}
 
 // Migration: fix dates stored in bad format (M/D/YY → YYYY-MM-DD)
 // Runs after Drive data loads and saves back if anything changed
