@@ -373,27 +373,12 @@ select.filter-input{cursor:pointer}
   <div class="auth-box">
     <div class="auth-flame">🔥</div>
     <h1>Kitchen<br/>Books</h1>
-    <!-- Returning user: show name + one-tap continue -->
-    <div id="returning-user" style="display:none;margin-bottom:20px">
-      <div style="background:var(--paper2);border:1px solid var(--border);border-radius:var(--radius);padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:14px">
-        <div id="returning-avatar" style="width:32px;height:32px;border-radius:50%;background:var(--fire);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;font-family:var(--font-mono)">?</div>
-        <span id="returning-name" style="font-size:14px;font-weight:500;flex:1">User</span>
-      </div>
-      <button class="btn-google" onclick="handleAuth()" style="width:100%;justify-content:center">
-        <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-        Continue as <span id="returning-name-btn">User</span>
-      </button>
-      <button onclick="switchAccount()" style="width:100%;margin-top:8px;padding:10px;background:none;border:1px solid var(--border);border-radius:var(--radius);font-size:13px;color:var(--ink2);cursor:pointer;font-family:var(--font-body)">Sign in with a different account</button>
-    </div>
-    <!-- New user: full sign in -->
-    <div id="new-user-signin">
-      <p style="font-size:14px;color:var(--ink2);line-height:1.6;margin-bottom:28px">Financial overview for your cloud kitchen — revenue, expenses, and receipt archive in one place.</p>
-      <button class="btn-google" onclick="handleAuth()">
-        <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
-        Sign in with Google
-      </button>
-    </div>
-    <div class="auth-note" style="margin-top:16px">KOR-exemption · No VAT administration</div>
+    <p>Financial overview for your cloud kitchen — revenue, expenses, and receipt archive in one place.</p>
+    <button class="btn-google" onclick="handleAuth()">
+      <svg viewBox="0 0 24 24"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/></svg>
+      Sign in with Google
+    </button>
+    <div class="auth-note">KOR-exemption · No VAT administration</div>
   </div>
 </div>
 
@@ -968,60 +953,46 @@ function saveReceipts() { saveToDrive(); }
 
 // ─── AUTH ────────────────────────────────────────────
 let tokenClient = null;
-let cachedUserHint = null; // Google account email hint for faster re-auth
 
-// On page load: if user was here before, show returning-user UI — no popup
+// Called on page load — silently restores session if user was previously signed in
 function tryAutoSignIn() {
+  if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') return;
   const wasSignedIn = localStorage.getItem('kb_signed_in');
-  const cachedName = localStorage.getItem('kb_user_name');
-  const cachedEmail = localStorage.getItem('kb_user_email');
-  if (!wasSignedIn || !cachedName) return; // never signed in
-  cachedUserHint = cachedEmail || null;
-
-  // Show returning user UI — no popup, just a "Continue as X" button
-  $('returning-user').style.display = 'block';
-  $('new-user-signin').style.display = 'none';
-  $('returning-name').textContent = cachedName;
-  $('returning-name-btn').textContent = cachedName.split(' ')[0]; // first name
-  $('returning-avatar').textContent = cachedName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+  if (!wasSignedIn) return;
+  const waitForGIS = () => {
+    if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID, scope: SCOPES,
+      prompt: '', // silent — no popup if Google session cookie still valid
+      callback: async r => {
+        if (r.error) {
+          // Silent failed — show login screen
+          $('auth-screen').style.display = 'flex';
+          $('app').style.display = 'none';
+          return;
+        }
+        accessToken = r.access_token;
+        scheduleTokenRefresh();
+        await onSignedIn();
+      }
+    });
+    tokenClient.requestAccessToken();
+  };
+  waitForGIS();
 }
 
-// Called when user clicks Sign in (or Continue as X)
+// Called when user clicks Sign in button
 function handleAuth() {
   const waitForGIS = () => {
     if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
-    const opts = { client_id: CLIENT_ID, scope: SCOPES };
-    // If we know the user's email, pass it as hint — Google skips the chooser
-    if (cachedUserHint) opts.hint = cachedUserHint;
     tokenClient = google.accounts.oauth2.initTokenClient({
-      ...opts,
+      client_id: CLIENT_ID, scope: SCOPES,
       callback: async r => {
         if (r.error) {
           $('auth-screen').style.display = 'flex';
           alert('Sign-in failed: ' + r.error);
           return;
         }
-        accessToken = r.access_token;
-        localStorage.setItem('kb_signed_in', '1');
-        scheduleTokenRefresh();
-        await onSignedIn();
-      }
-    });
-    // Use 'none' prompt if we have a hint — avoids the chooser popup entirely
-    // Fall back to 'select_account' for new users
-    tokenClient.requestAccessToken({ prompt: cachedUserHint ? 'none' : 'select_account' });
-  };
-  waitForGIS();
-}
-
-function switchAccount() {
-  cachedUserHint = null;
-  const waitForGIS = () => {
-    if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
-    tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPES,
-      callback: async r => {
-        if (r.error) { $('auth-screen').style.display='flex'; return; }
         accessToken = r.access_token;
         localStorage.setItem('kb_signed_in', '1');
         scheduleTokenRefresh();
@@ -1041,8 +1012,8 @@ async function onSignedIn() {
   if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') $('setup-banner').style.display = 'block';
   loadSavedFolder();
   await loadFromDrive();
-  await fixLegacyDates(); // fix any bad dates AFTER Drive data is loaded, then save back
-  await scanDriveForMissingReceipts(); // recover any receipts uploaded from other devices
+  await fixLegacyDates();
+  await scanDriveForMissingReceipts();
   refreshAll();
   startAutoSync();
   showSyncStatus('ready', 'Auto-sync on · every 60s');
@@ -1052,7 +1023,6 @@ async function onSignedIn() {
 let tokenRefreshTimer = null;
 function scheduleTokenRefresh() {
   if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
-  // Refresh after 55 minutes (tokens expire at 60 min)
   tokenRefreshTimer = setTimeout(() => {
     if (!tokenClient) return;
     tokenClient = google.accounts.oauth2.initTokenClient({
@@ -1060,7 +1030,7 @@ function scheduleTokenRefresh() {
       callback: r => {
         if (!r.error) {
           accessToken = r.access_token;
-          scheduleTokenRefresh(); // reschedule next refresh
+          scheduleTokenRefresh();
         }
       }
     });
@@ -1074,8 +1044,6 @@ async function fetchUser() {
   $('user-name-side').textContent = name;
   $('user-av').textContent = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   localStorage.setItem('kb_user_name', name);
-  localStorage.setItem('kb_user_email', u.email||''); // save email for hint-based re-auth
-  cachedUserHint = u.email || null;
 }
 
 function handleSignOut() {
@@ -1085,8 +1053,6 @@ function handleSignOut() {
   // Clear session flag so auto-sign-in doesn't trigger next time
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
-  localStorage.removeItem('kb_user_email');
-  cachedUserHint = null;
   accessToken=null; transactions=[]; receipts=[]; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
@@ -1762,7 +1728,16 @@ let lastSyncTime = null;
 // ─── BOOT ────────────────────────────────────────────
 // On page load: show cached user name immediately, then silently restore session
 window.addEventListener('load', () => {
-  tryAutoSignIn(); // show returning-user UI or fresh sign-in
+  const cachedName = localStorage.getItem('kb_user_name');
+  if (cachedName && localStorage.getItem('kb_signed_in')) {
+    // Show app shell instantly from cache while silent token request runs in background
+    $('user-name-side').textContent = cachedName;
+    $('user-av').textContent = cachedName.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
+    $('auth-screen').style.display = 'none';
+    $('app').style.display = 'grid';
+    showSyncStatus('loading');
+  }
+  tryAutoSignIn();
 });
 
 // Scan Drive folder for receipt files not yet in receipts metadata
