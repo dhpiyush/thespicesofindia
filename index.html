@@ -1264,8 +1264,6 @@ function importMoneybird(input) {
   reader.readAsArrayBuffer(file);
 }
 
-function saveTxns(){localStorage.setItem('txns',JSON.stringify(transactions));}
-
 // ─── TRANSACTIONS ────────────────────────────────────
 function renderTransactions() {
   const search=($('search-txn')?.value||'').toLowerCase();
