@@ -2,7 +2,7 @@
 const CLIENT_ID = '354274835745-f36h72g2th27fafmkj3i7d57kov2u8kc.apps.googleusercontent.com';
 // drive.file = upload new files; drive.appdata not enough for shared folder
 // We need drive scope to read/write the shared kitchen-data.json
-const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.profile';
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email';
 const DATA_FILENAME = 'kitchen-data.json';
 // ────────────────────────────────────────────────────
 
@@ -176,11 +176,16 @@ function tryAutoSignIn() {
   if (CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID') return;
   const wasSignedIn = localStorage.getItem('kb_signed_in');
   if (!wasSignedIn) return;
+  // Without a hint, Google can't tell which signed-in browser session to
+  // reuse and falls back to showing the account chooser. Passing the
+  // email we saw at last sign-in lets it resolve silently instead.
+  const cachedEmail = localStorage.getItem('kb_user_email');
   const waitForGIS = () => {
     if (!window.google?.accounts?.oauth2) { setTimeout(waitForGIS, 200); return; }
     tokenClient = google.accounts.oauth2.initTokenClient({
       client_id: CLIENT_ID, scope: SCOPES,
-      prompt: '', // silent — no popup if Google session cookie still valid
+      prompt: 'none', // never show UI — fail into our own login screen instead
+      ...(cachedEmail ? { hint: cachedEmail } : {}),
       callback: async r => {
         if (r.error) {
           // Silent failed — show login screen
@@ -242,8 +247,10 @@ function scheduleTokenRefresh() {
   if (tokenRefreshTimer) clearTimeout(tokenRefreshTimer);
   tokenRefreshTimer = setTimeout(() => {
     if (!tokenClient) return;
+    const cachedEmail = localStorage.getItem('kb_user_email');
     tokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: CLIENT_ID, scope: SCOPES, prompt: '',
+      client_id: CLIENT_ID, scope: SCOPES, prompt: 'none',
+      ...(cachedEmail ? { hint: cachedEmail } : {}),
       callback: r => {
         if (!r.error) {
           accessToken = r.access_token;
@@ -261,6 +268,7 @@ async function fetchUser() {
   $('user-name-side').textContent = name;
   $('user-av').textContent = name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
   localStorage.setItem('kb_user_name', name);
+  if (u.email) localStorage.setItem('kb_user_email', u.email);
 }
 
 function handleSignOut() {
@@ -270,6 +278,7 @@ function handleSignOut() {
   // Clear session flag so auto-sign-in doesn't trigger next time
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
+  localStorage.removeItem('kb_user_email');
   accessToken=null; transactions=[]; receipts=[]; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
