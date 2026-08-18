@@ -53,6 +53,11 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         Receipts
       </button>
+      <button class="nav-item" onclick="showPage('pending',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        Pending
+        <span id="nav-pending-badge" style="display:none;margin-left:auto;font-size:10px;background:var(--red);color:#fff;padding:1px 7px;border-radius:20px;font-family:var(--font-mono)"></span>
+      </button>
       <div class="nav-label">Reports</div>
       <button class="nav-item" onclick="showPage('pl',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -264,6 +269,22 @@
       </div>
     </div>
 
+    <!-- PENDING TASKS -->
+    <div class="page" id="page-pending">
+      <div class="page-header">
+        <div class="row">
+          <div class="flex-1">
+            <h2>Pending tasks</h2>
+            <p>Receipts that match more than one transaction — pick the right one</p>
+          </div>
+          <button class="btn btn-secondary btn-sm" onclick="runDailyReceiptMatch(true)">↻ Check now</button>
+        </div>
+      </div>
+      <div id="pending-list-wrap">
+        <div class="empty"><div class="empty-icon">✅</div><h3>Nothing pending</h3><p>Receipts that match more than one transaction will show up here for you to resolve.</p></div>
+      </div>
+    </div>
+
     <!-- P&L -->
     <div class="page" id="page-pl">
       <div class="page-header">
@@ -404,6 +425,11 @@
     <button class="bnav-item" id="bnav-receipts" onclick="showPage('receipts',this);setMobileNav('receipts')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       <span class="bnav-label">Receipts</span>
+    </button>
+    <button class="bnav-item" id="bnav-pending" onclick="showPage('pending',this);setMobileNav('pending')">
+      <span class="bnav-badge-dot" id="bnav-pending-dot" style="display:none"></span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      <span class="bnav-label">Pending</span>
     </button>
     <button class="bnav-item" id="bnav-pl" onclick="showPage('pl',this);setMobileNav('pl')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>

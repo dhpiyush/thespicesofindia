@@ -25,6 +25,8 @@ let accessToken = null;
 let transactions = [];
 let receipts = [];
 let pendingReceipts = [];
+let pendingTasks = []; // receipt↔transaction conflicts needing manual resolution
+let lastMatchJobRun = null; // ISO timestamp — gates the once-a-day auto-match job
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -80,6 +82,8 @@ async function loadFromDrive() {
       dataFileId = foundId;
       transactions = data.transactions || [];
       receipts = data.receipts || [];
+      pendingTasks = data.pendingTasks || [];
+      lastMatchJobRun = data.lastMatchJobRun || null;
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -125,7 +129,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -247,6 +251,7 @@ async function onSignedIn() {
   await loadFromDrive();
   await fixLegacyDates();
   await scanDriveForMissingReceipts();
+  await runDailyReceiptMatch();
   refreshAll();
   startAutoSync();
   showSyncStatus('ready', 'Auto-sync on · every 60s');
@@ -290,7 +295,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -303,6 +308,7 @@ async function syncNow() {
   await loadFromDrive();
   await fixLegacyDates();
   await scanDriveForMissingReceipts();
+  await runDailyReceiptMatch();
   refreshAll();
 }
 
@@ -315,6 +321,7 @@ function showPage(id, btn) {
   if (id==='dashboard') renderDashboard();
   if (id==='transactions') renderTransactions();
   if (id==='receipts') renderReceipts();
+  if (id==='pending') renderPending();
   if (id==='pl') renderPL();
   if (id==='quickupload') renderQuickUpload();
   if (id==='settings') renderSettings();
@@ -619,9 +626,10 @@ function renderReceipts() {
   list.innerHTML=pendingReceipts.map(r=>{
     const tag={pending:'Ready',uploading:'Uploading…',done:'Done',error:'Error'}[r.status];
     const tc={pending:'tag-ready',uploading:'tag-uploading',done:'tag-done',error:'tag-error'}[r.status];
-    return`<div class="receipt-item"><div class="receipt-icon">${r.file.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-info"><div class="receipt-name">${esc(r.file.name)}</div><div class="receipt-meta">${fmtSize(r.file.size)}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div><span class="receipt-tag ${tc}">${tag}</span>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`;
+    const amountInput=r.status==='pending'?`<input type="number" step="0.01" min="0" inputmode="decimal" class="filter-input" style="width:110px" placeholder="Amount € *" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:'';
+    return`<div class="receipt-item"><div class="receipt-icon">${r.file.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-info"><div class="receipt-name">${esc(r.file.name)}</div><div class="receipt-meta">${fmtSize(r.file.size)}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div>${amountInput}<span class="receipt-tag ${tc}">${tag}</span>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`;
   }).join('');
-  $('upload-receipts-btn').disabled=!pendingReceipts.filter(r=>r.status==='pending').length;
+  updateUploadButtonsState();
 
   if(!receipts.length){
     const empty='<div class="empty"><div class="empty-icon">🗂️</div><h3>No receipts yet</h3><p>Upload receipts above</p></div>';
@@ -665,6 +673,7 @@ function renderReceipts() {
               <a href="${r.url}" target="_blank" style="color:var(--fire);font-size:13px;font-weight:500">${esc(r.name)}</a>
             </td>
             <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.date||'—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.amount!=null?'€ '+fmtEur(r.amount):'—'}</td>
             <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
               ${isLinked
                 ?`<span class="badge badge-linked" title="${esc(lt.desc)}">🔗 ${esc(lt.desc.slice(0,22))}…</span>`
@@ -697,7 +706,7 @@ function renderReceipts() {
           <div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div>
           <div class="receipt-card-info flex-1" style="min-width:0">
             <div class="receipt-card-name">${esc(r.name)}</div>
-            <div class="receipt-card-meta">${r.date||''}${isLinked?' · 🔗 '+esc(lt.desc.slice(0,20)):' · not linked'}</div>
+            <div class="receipt-card-meta">${r.date||''}${r.amount!=null?' · € '+fmtEur(r.amount):''}${isLinked?' · 🔗 '+esc(lt.desc.slice(0,20)):' · not linked'}</div>
             <div class="receipt-card-actions">
               <a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a>
               <button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${isLinked?'Relink':'Link →'}</button>
@@ -720,15 +729,14 @@ function renderQuickUpload() {
   const pending=pendingReceipts.filter(r=>r.status==='pending'||r.status==='uploading');
   if(pending.length){
     queue.style.display='block';
-    qList.innerHTML=pending.map(r=>`<div class="qu-item"><div class="qu-item-thumb">${r.file.type.startsWith('image/')?`<img src="${URL.createObjectURL(r.file)}"/>`:r.file.name.match(/\.pdf$/i)?'📄':'📁'}</div><div class="qu-item-info"><div class="qu-item-name">${esc(r.file.name)}</div><div class="qu-item-meta">${fmtSize(r.file.size)}${r.status==='uploading'?` · ${r.progress}%`:''}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`).join('');
+    qList.innerHTML=pending.map(r=>`<div class="qu-item"><div class="qu-item-thumb">${r.file.type.startsWith('image/')?`<img src="${URL.createObjectURL(r.file)}"/>`:r.file.name.match(/\.pdf$/i)?'📄':'📁'}</div><div class="qu-item-info"><div class="qu-item-name">${esc(r.file.name)}</div><div class="qu-item-meta">${fmtSize(r.file.size)}${r.status==='uploading'?` · ${r.progress}%`:''}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}${r.status==='pending'?`<input type="number" step="0.01" min="0" inputmode="decimal" class="filter-input" style="width:100%;margin-top:6px" placeholder="Amount € — required" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:''}</div>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`).join('');
   } else { queue.style.display='none'; }
-  const btn=$('qu-upload-btn');
-  if(btn) btn.disabled=!pendingReceipts.filter(r=>r.status==='pending').length;
+  updateUploadButtonsState();
   // Recent
   const recent=$('qu-recent-list');
   if(recent){
     if(!receipts.length){recent.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--ink3);font-size:13px">No receipts yet</div>';}
-    else{recent.innerHTML=receipts.slice().reverse().slice(0,5).map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${lt?' · linked':' · not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link'}</button></div></div></div>`;}).join('');}
+    else{recent.innerHTML=receipts.slice().reverse().slice(0,5).map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${r.amount!=null?' · € '+fmtEur(r.amount):''}${lt?' · linked':' · not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link'}</button></div></div></div>`;}).join('');}
   }
 }
 
@@ -737,9 +745,25 @@ function addReceiptsQU(files){addReceipts(files);renderQuickUpload();}
 function addReceipts(files){
   for(const f of files){
     if(f.size>20*1024*1024){alert(f.name+' exceeds 20 MB limit');continue;}
-    pendingReceipts.push({id:'pr_'+Math.random().toString(36).slice(2),file:f,status:'pending',progress:0});
+    pendingReceipts.push({id:'pr_'+Math.random().toString(36).slice(2),file:f,status:'pending',progress:0,amount:''});
   }
   renderReceipts();
+}
+
+// Update the amount on a pending receipt without re-rendering the list —
+// re-rendering on every keystroke would rebuild the <input> and steal focus.
+function updatePendingAmount(id,val){
+  const r=pendingReceipts.find(r=>r.id===id);
+  if(r){r.amount=val;updateUploadButtonsState();}
+}
+
+function pendingHasValidAmount(r){return r.amount!==''&&r.amount!=null&&!isNaN(parseFloat(r.amount))&&parseFloat(r.amount)>0;}
+
+function updateUploadButtonsState(){
+  const pending=pendingReceipts.filter(r=>r.status==='pending');
+  const ready=pending.length>0&&pending.every(pendingHasValidAmount);
+  const btn=$('upload-receipts-btn'); if(btn) btn.disabled=!ready;
+  const qbtn=$('qu-upload-btn'); if(qbtn) qbtn.disabled=!ready;
 }
 
 function removePending(id){pendingReceipts=pendingReceipts.filter(r=>r.id!==id);renderReceipts();}
@@ -748,6 +772,8 @@ function clearDoneReceipts(){pendingReceipts=pendingReceipts.filter(r=>r.status!
 async function uploadAllReceipts(fromQuick=false){
   if(!accessToken){alert('Please sign in first.');return;}
   const pending=pendingReceipts.filter(r=>r.status==='pending');
+  if(!pending.length)return;
+  if(pending.some(r=>!pendingHasValidAmount(r))){alert('Please enter a valid amount for every receipt before uploading — it\'s required to match receipts to transactions.');return;}
   for(const r of pending) await uploadReceipt(r);
   saveReceipts();renderReceipts();
 }
@@ -769,7 +795,7 @@ async function uploadReceipt(entry){
     xhr.setRequestHeader('Authorization','Bearer '+accessToken);
     xhr.upload.onprogress=e=>{if(e.lengthComputable){entry.progress=Math.round(e.loaded/e.total*100);renderReceipts();renderQuickUpload();}};
     xhr.onload=()=>{
-      if(xhr.status===200){const resp=JSON.parse(xhr.responseText);entry.status='done';receipts.push({id:entry.id,name:newName,url:resp.webViewLink,date:ds,driveId:resp.id});saveReceipts();}
+      if(xhr.status===200){const resp=JSON.parse(xhr.responseText);entry.status='done';receipts.push({id:entry.id,name:newName,url:resp.webViewLink,date:ds,driveId:resp.id,amount:parseFloat(entry.amount)});saveReceipts();}
       else{entry.status='error';}
       resolve();
     };
@@ -813,6 +839,102 @@ function confirmLink(){
 }
 
 function closeModal(e){if(e.target.id==='link-modal')$('link-modal').style.display='none';}
+
+// ─── RECEIPT ↔ TRANSACTION AUTO-MATCH (runs at most once/day) ──
+// Matches receipts (by their entered amount) to unlinked transactions of the same amount.
+// One candidate → link automatically. Multiple candidates → raise a pending task for manual
+// resolution. lastMatchJobRun is persisted to Drive so the "once a day" gate holds across
+// devices/sessions, not just this browser.
+async function runDailyReceiptMatch(force){
+  const today=new Date().toDateString();
+  if(!force && lastMatchJobRun && new Date(lastMatchJobRun).toDateString()===today) return;
+  matchReceiptsToTransactions();
+  lastMatchJobRun=new Date().toISOString();
+  await saveToDrive();
+  renderReceipts();renderTransactions();renderDashboard();renderPending();
+}
+
+function matchReceiptsToTransactions(){
+  let changed=false;
+  for(const r of receipts){
+    if(r.amount==null) continue; // legacy/recovered receipts with no amount — can't match
+    if(transactions.some(t=>t.receiptId===r.id)) continue; // already linked
+    if(pendingTasks.some(p=>p.receiptId===r.id)) continue; // already flagged (open, resolved or dismissed)
+    const candidates=transactions.filter(t=>!t.receiptId && Math.abs(t.amount-r.amount)<0.01);
+    if(candidates.length===1){
+      candidates[0].receiptId=r.id;
+      changed=true;
+    } else if(candidates.length>1){
+      pendingTasks.push({
+        id:'pt_'+Math.random().toString(36).slice(2),
+        receiptId:r.id, amount:r.amount,
+        candidateTxnIds:candidates.map(t=>t.id),
+        createdAt:new Date().toISOString(), status:'open'
+      });
+      changed=true;
+    }
+    // zero candidates: leave for a future run once a matching transaction is imported
+  }
+  return changed;
+}
+
+// ─── PENDING TASKS ───────────────────────────────────
+function renderPending(){
+  const open=pendingTasks.filter(p=>p.status==='open');
+  const badge=$('nav-pending-badge');
+  if(badge){ badge.style.display=open.length?'inline-block':'none'; badge.textContent=open.length; }
+  const dot=$('bnav-pending-dot');
+  if(dot) dot.style.display=open.length?'block':'none';
+
+  const wrap=$('pending-list-wrap');
+  if(!wrap) return;
+  if(!open.length){
+    wrap.innerHTML='<div class="empty"><div class="empty-icon">✅</div><h3>Nothing pending</h3><p>Receipts that match more than one transaction will show up here for you to resolve.</p></div>';
+    return;
+  }
+  wrap.innerHTML=open.map(p=>{
+    const r=receipts.find(rc=>rc.id===p.receiptId);
+    // Re-filter live: a candidate may have been linked elsewhere since this task was created
+    const cands=transactions.filter(t=>p.candidateTxnIds.includes(t.id)&&!t.receiptId);
+    const header=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <div>${r?`<a href="${r.url}" target="_blank" style="font-weight:500;color:var(--fire)">${esc(r.name)}</a>`:'<strong>Receipt</strong>'}
+          <span style="font-family:var(--font-mono);color:var(--ink3);font-size:12px;margin-left:6px">€ ${fmtEur(p.amount)}</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="dismissPendingTask('${p.id}')">Dismiss</button>
+      </div>`;
+    if(!cands.length){
+      return `<div class="card" style="margin-bottom:12px">${header}<p style="font-size:12px;color:var(--ink3)">All matching transactions were already linked elsewhere — dismiss or link this receipt manually from the Receipts tab.</p></div>`;
+    }
+    return `<div class="card" style="margin-bottom:12px">${header}
+      <div style="font-size:12px;color:var(--ink3);margin-bottom:8px">${cands.length} transactions match this amount — pick the right one:</div>
+      <div class="modal-list">
+        ${cands.map(t=>`<div class="modal-item" onclick="resolvePendingTask('${p.id}','${t.id}')">
+          <span style="font-family:var(--font-mono);font-size:11px;white-space:nowrap">${t.date}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;padding:0 8px">${esc(t.desc)}</span>
+          <span class="${t.type==='in'?'amount-in':'amount-out'}" style="font-family:var(--font-mono);font-size:12px">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function resolvePendingTask(taskId,txnId){
+  const p=pendingTasks.find(p=>p.id===taskId); if(!p) return;
+  const t=transactions.find(t=>t.id===txnId);
+  if(!t||t.receiptId){ alert('That transaction is no longer available — it may have just been linked elsewhere.'); renderPending(); return; }
+  t.receiptId=p.receiptId;
+  p.status='resolved'; p.resolvedTxnId=txnId; p.resolvedAt=new Date().toISOString();
+  saveTxns();
+  renderPending();renderReceipts();renderTransactions();renderDashboard();
+}
+
+function dismissPendingTask(taskId){
+  const p=pendingTasks.find(p=>p.id===taskId); if(!p) return;
+  if(!confirm('Dismiss this task and leave the receipt unlinked?')) return;
+  p.status='dismissed'; p.dismissedAt=new Date().toISOString();
+  saveToDrive();
+  renderPending();
+}
 
 // ─── GOOGLE DRIVE ────────────────────────────────────
 function pickFolder(){ pickFolderFromSettings(); }
@@ -915,7 +1037,7 @@ function fmtMonth(m){
 }
 function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();}
+function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();}
 
 // ─── AUTO SYNC ───────────────────────────────────────
 let autoSyncInterval = null;
@@ -945,6 +1067,8 @@ function startAutoSync() {
           dataFileId = foundId;
           transactions = data.transactions || [];
           receipts = data.receipts || [];
+          pendingTasks = data.pendingTasks || [];
+          lastMatchJobRun = data.lastMatchJobRun || lastMatchJobRun;
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
