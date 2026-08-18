@@ -10,6 +10,17 @@ const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue'
 const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal'];
 const PRIVATE_CATEGORIES = ['Private deposit','Private withdrawal'];
 
+// Shared duplicate check for CSV/XLSX imports: same date + amount + direction, with a fuzzy
+// (substring) desc match, since different export formats describe the same mutation differently.
+function isDuplicateTxn(dateStr, amt, isIn, desc) {
+  const d = (desc || '').trim().toLowerCase();
+  return transactions.some(t => {
+    if (t.date !== dateStr || Math.abs(t.amount - amt) >= 0.01 || t.type !== (isIn ? 'in' : 'out')) return false;
+    const td = (t.desc || '').trim().toLowerCase();
+    return !td || !d || td.includes(d) || d.includes(td);
+  });
+}
+
 let accessToken = null;
 let transactions = [];
 let receipts = [];
@@ -321,7 +332,7 @@ function importING(input) {
   const reader = new FileReader();
   reader.onload = e => {
     Papa.parse(e.target.result, {
-      delimiter:';', header:true, skipEmptyLines:true, quoteChar:'"',
+      delimiter:'', header:true, skipEmptyLines:true, quoteChar:'"', // '' = auto-detect ',' vs ';' (ING exports vary)
       complete: r => {
         if (!r.data.length) { alert('No transactions found. Check this is an ING CSV export.'); return; }
         const rows=r.data, sample=rows[0];
@@ -360,8 +371,9 @@ function importING(input) {
           const descClean = desc.trim();
 
           const id='txn_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
-          // Duplicate check: same date + amount + description
-          if(transactions.some(t=>t.date===dateStr&&t.amount===amt&&t.desc===descClean)){skipped++;continue;}
+          // Duplicate check: same date + amount + direction, with a fuzzy desc match
+          // (description text varies between export formats, e.g. "G. Bijsterbosch" vs "Betaling van G. Bijsterbosch NL13...")
+          if(isDuplicateTxn(dateStr, amt, isIn, descClean)){skipped++;continue;}
           transactions.push({
             id, date:dateStr, desc:descClean, amount:amt,
             type:isIn?'in':'out',
@@ -465,8 +477,9 @@ function importMoneybird(input) {
           category = isIn ? 'Private deposit' : 'Private withdrawal';
         }
 
-        // Duplicate check
-        if (transactions.some(t => t.date === dateStr && Math.abs(t.amount - absAmt) < 0.01 && t.desc === desc)) {
+        // Duplicate check: same date + amount + direction, with a fuzzy desc match
+        // (description text varies between export formats, e.g. "G. Bijsterbosch" vs "Betaling van G. Bijsterbosch NL13...")
+        if (isDuplicateTxn(dateStr, absAmt, isIn, desc)) {
           skipped++; continue;
         }
 
