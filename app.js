@@ -626,7 +626,7 @@ function renderReceipts() {
   list.innerHTML=pendingReceipts.map(r=>{
     const tag={pending:'Ready',uploading:'Uploading…',done:'Done',error:'Error'}[r.status];
     const tc={pending:'tag-ready',uploading:'tag-uploading',done:'tag-done',error:'tag-error'}[r.status];
-    const amountInput=r.status==='pending'?`<input type="number" step="0.01" min="0" inputmode="decimal" class="filter-input" style="width:110px" placeholder="Amount € *" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:'';
+    const amountInput=r.status==='pending'?`<input type="text" inputmode="decimal" class="filter-input" style="width:110px" placeholder="Amount € *" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:'';
     return`<div class="receipt-item"><div class="receipt-icon">${r.file.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-info"><div class="receipt-name">${esc(r.file.name)}</div><div class="receipt-meta">${fmtSize(r.file.size)}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}</div>${amountInput}<span class="receipt-tag ${tc}">${tag}</span>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`;
   }).join('');
   updateUploadButtonsState();
@@ -730,7 +730,7 @@ function renderQuickUpload() {
   const pending=pendingReceipts.filter(r=>r.status==='pending'||r.status==='uploading');
   if(pending.length){
     queue.style.display='block';
-    qList.innerHTML=pending.map(r=>`<div class="qu-item"><div class="qu-item-thumb">${r.file.type.startsWith('image/')?`<img src="${URL.createObjectURL(r.file)}"/>`:r.file.name.match(/\.pdf$/i)?'📄':'📁'}</div><div class="qu-item-info"><div class="qu-item-name">${esc(r.file.name)}</div><div class="qu-item-meta">${fmtSize(r.file.size)}${r.status==='uploading'?` · ${r.progress}%`:''}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}${r.status==='pending'?`<input type="number" step="0.01" min="0" inputmode="decimal" class="filter-input" style="width:100%;margin-top:6px" placeholder="Amount € — required" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:''}</div>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`).join('');
+    qList.innerHTML=pending.map(r=>`<div class="qu-item"><div class="qu-item-thumb">${r.file.type.startsWith('image/')?`<img src="${URL.createObjectURL(r.file)}"/>`:r.file.name.match(/\.pdf$/i)?'📄':'📁'}</div><div class="qu-item-info"><div class="qu-item-name">${esc(r.file.name)}</div><div class="qu-item-meta">${fmtSize(r.file.size)}${r.status==='uploading'?` · ${r.progress}%`:''}</div>${r.status==='uploading'?`<div class="progress-bar"><div class="progress-fill" style="width:${r.progress}%"></div></div>`:''}${r.status==='pending'?`<input type="text" inputmode="decimal" class="filter-input" style="width:100%;margin-top:6px" placeholder="Amount € — required" value="${r.amount||''}" oninput="updatePendingAmount('${r.id}',this.value)"/>`:''}</div>${r.status!=='uploading'?`<button class="btn-x" onclick="removePending('${r.id}')">×</button>`:''}</div>`).join('');
   } else { queue.style.display='none'; }
   updateUploadButtonsState();
   // Recent
@@ -758,7 +758,14 @@ function updatePendingAmount(id,val){
   if(r){r.amount=val;updateUploadButtonsState();}
 }
 
-function pendingHasValidAmount(r){return r.amount!==''&&r.amount!=null&&!isNaN(parseFloat(r.amount))&&parseFloat(r.amount)>0;}
+// Accepts either '.' or ',' as the decimal separator — iOS shows a comma-only numeric
+// keypad for many EU keyboard locales, and a plain parseFloat('12,50') silently truncates
+// to 12 instead of failing, so this must run before any amount is validated or stored.
+function parseAmountInput(val){
+  return parseFloat(String(val==null?'':val).trim().replace(',','.'));
+}
+
+function pendingHasValidAmount(r){return r.amount!==''&&r.amount!=null&&!isNaN(parseAmountInput(r.amount))&&parseAmountInput(r.amount)>0;}
 
 function updateUploadButtonsState(){
   const pending=pendingReceipts.filter(r=>r.status==='pending');
@@ -796,7 +803,7 @@ async function uploadReceipt(entry){
     xhr.setRequestHeader('Authorization','Bearer '+accessToken);
     xhr.upload.onprogress=e=>{if(e.lengthComputable){entry.progress=Math.round(e.loaded/e.total*100);renderReceipts();renderQuickUpload();}};
     xhr.onload=()=>{
-      if(xhr.status===200){const resp=JSON.parse(xhr.responseText);entry.status='done';receipts.push({id:entry.id,name:newName,url:resp.webViewLink,date:ds,driveId:resp.id,amount:parseFloat(entry.amount)});saveReceipts();}
+      if(xhr.status===200){const resp=JSON.parse(xhr.responseText);entry.status='done';receipts.push({id:entry.id,name:newName,url:resp.webViewLink,date:ds,driveId:resp.id,amount:parseAmountInput(entry.amount)});saveReceipts();}
       else{entry.status='error';}
       resolve();
     };
@@ -812,7 +819,7 @@ function editReceiptAmount(receiptId){
   const r=receipts.find(r=>r.id===receiptId); if(!r) return;
   const input=prompt('Amount for "'+r.name+'" (€):', r.amount!=null?r.amount:'');
   if(input===null) return; // cancelled
-  const val=parseFloat(String(input).trim().replace(',','.'));
+  const val=parseAmountInput(input);
   if(isNaN(val)||val<=0){alert('Please enter a valid amount greater than 0.');return;}
   r.amount=val;
   pendingTasks=pendingTasks.filter(p=>!(p.receiptId===receiptId&&p.status==='open'));
