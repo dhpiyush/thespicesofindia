@@ -151,6 +151,8 @@ select.filter-input{cursor:pointer}
 .tag-error{background:var(--red-light);color:var(--red)}
 .btn-x{background:none;border:none;cursor:pointer;color:var(--ink3);font-size:16px;padding:2px 4px}
 .btn-x:hover{color:var(--red)}
+.amount-edit-btn{background:none;border:none;cursor:pointer;color:var(--ink3);font-size:12px;padding:2px 4px;line-height:1;vertical-align:middle}
+.amount-edit-btn:hover{color:var(--fire)}
 .progress-bar{height:2px;background:var(--border);border-radius:2px;margin-top:4px;overflow:hidden}
 .progress-fill{height:100%;background:var(--fire);border-radius:2px;transition:width 0.3s}
 
