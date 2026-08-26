@@ -673,7 +673,7 @@ function renderReceipts() {
               <a href="${r.url}" target="_blank" style="color:var(--fire);font-size:13px;font-weight:500">${esc(r.name)}</a>
             </td>
             <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.date||'—'}</td>
-            <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.amount!=null?'€ '+fmtEur(r.amount):'—'}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid var(--border);font-size:12px;font-family:var(--font-mono);white-space:nowrap;color:var(--ink2)">${r.amount!=null?'€ '+fmtEur(r.amount):'—'}<button class="amount-edit-btn" title="Edit amount" onclick="editReceiptAmount('${r.id}')">✎</button></td>
             <td style="padding:9px 12px;border-bottom:1px solid var(--border)">
               ${isLinked
                 ?`<span class="badge badge-linked" title="${esc(lt.desc)}">🔗 ${esc(lt.desc.slice(0,22))}…</span>`
@@ -709,6 +709,7 @@ function renderReceipts() {
             <div class="receipt-card-meta">${r.date||''}${r.amount!=null?' · € '+fmtEur(r.amount):''}${isLinked?' · 🔗 '+esc(lt.desc.slice(0,20)):' · not linked'}</div>
             <div class="receipt-card-actions">
               <a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a>
+              <button class="btn btn-secondary btn-sm" onclick="editReceiptAmount('${r.id}')">Edit €</button>
               <button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${isLinked?'Relink':'Link →'}</button>
             </div>
           </div>
@@ -736,7 +737,7 @@ function renderQuickUpload() {
   const recent=$('qu-recent-list');
   if(recent){
     if(!receipts.length){recent.innerHTML='<div style="text-align:center;padding:1.5rem;color:var(--ink3);font-size:13px">No receipts yet</div>';}
-    else{recent.innerHTML=receipts.slice().reverse().slice(0,5).map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${r.amount!=null?' · € '+fmtEur(r.amount):''}${lt?' · linked':' · not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link'}</button></div></div></div>`;}).join('');}
+    else{recent.innerHTML=receipts.slice().reverse().slice(0,5).map(r=>{const lt=transactions.find(t=>t.receiptId===r.id);return`<div class="receipt-card"><div class="receipt-card-icon">${r.name.match(/\.pdf$/i)?'📄':'🖼️'}</div><div class="receipt-card-info flex-1" style="min-width:0"><div class="receipt-card-name">${esc(r.name)}</div><div class="receipt-card-meta">${r.date}${r.amount!=null?' · € '+fmtEur(r.amount):''}${lt?' · linked':' · not linked'}</div><div class="receipt-card-actions"><a href="${r.url}" target="_blank" class="btn btn-secondary btn-sm">View ↗</a><button class="btn btn-secondary btn-sm" onclick="editReceiptAmount('${r.id}')">Edit €</button><button class="btn btn-secondary btn-sm" onclick="openLinkForReceipt('${r.id}')">${lt?'Relink':'Link'}</button></div></div></div>`;}).join('');}
   }
 }
 
@@ -802,6 +803,22 @@ async function uploadReceipt(entry){
     xhr.onerror=()=>{entry.status='error';resolve();};
     xhr.send(form);
   });
+}
+
+// Edit the amount on an already-uploaded receipt (e.g. to fix a typo made at upload time).
+// Drops any open pending task for it, since that task's candidates were computed off the old
+// amount, then re-runs matching immediately so the corrected amount gets a fresh chance to link.
+function editReceiptAmount(receiptId){
+  const r=receipts.find(r=>r.id===receiptId); if(!r) return;
+  const input=prompt('Amount for "'+r.name+'" (€):', r.amount!=null?r.amount:'');
+  if(input===null) return; // cancelled
+  const val=parseFloat(String(input).trim().replace(',','.'));
+  if(isNaN(val)||val<=0){alert('Please enter a valid amount greater than 0.');return;}
+  r.amount=val;
+  pendingTasks=pendingTasks.filter(p=>!(p.receiptId===receiptId&&p.status==='open'));
+  matchReceiptsToTransactions();
+  saveReceipts();
+  renderReceipts();renderTransactions();renderDashboard();renderPending();
 }
 
 // saveReceipts: defined above — saves to Drive via saveToDrive()
