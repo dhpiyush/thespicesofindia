@@ -21,6 +21,18 @@ function isDuplicateTxn(dateStr, amt, isIn, desc) {
   });
 }
 
+// Match each existing record at most once per statement. Equal payments on the
+// same day can be separate transactions, especially workshop registrations.
+function findINGDuplicate(existing, matched, date, amount, type, desc, details) {
+  const normalize = value => (value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const incoming = [desc, details].map(normalize).filter(Boolean);
+  return existing.find(t => {
+    if (matched.has(t.id) || t.date !== date || Math.abs(t.amount - amount) >= 0.01 || t.type !== type) return false;
+    const stored = [t.desc, t.bankDetails].map(normalize).filter(Boolean);
+    return stored.some(a => incoming.some(b => a === b || a.includes(b) || b.includes(a)));
+  });
+}
+
 let accessToken = null;
 let transactions = [];
 let receipts = [];
@@ -350,6 +362,7 @@ function importING(input) {
         const descKey = keys.find(k => k.trim().match(/^Name\s*\/\s*Description$|^Naam\s*[/\/]\s*Omschrijving$|^Naam$/i));
         const amtKey  = keys.find(k => k.trim().match(/^Amount\s*\(EUR\)$|^Bedrag\s*\(EUR\)$/i));
         const dirKey  = keys.find(k => k.trim().match(/^Debit\/credit$|^Af\s*Bij$|^Bij\/Af$/i));
+        const detailsKey = keys.find(k => /^(Notifications|Mededelingen)$/i.test(k.trim()));
 
         if (!amtKey || !dirKey) {
           alert('Could not detect ING CSV columns.\n\nFound columns: ' + keys.join(', ') + '\n\nPlease make sure you are uploading an ING transaction export (CSV).');
@@ -357,6 +370,7 @@ function importING(input) {
         }
 
         let added=0, skipped=0;
+        const existing = transactions.slice(), matched = new Set();
         for (const row of rows) {
           // Amount: strip thousands separator (.) and replace decimal comma
           const rawAmt=(row[amtKey]||'').trim().replace(/\./g,'').replace(',','.');
@@ -376,13 +390,15 @@ function importING(input) {
 
           const desc=(descKey ? row[descKey] : '') || row['Name / Description'] || row['Naam / Omschrijving'] || row['Naam'] || '';
           const descClean = desc.trim();
+          const bankDetails = (detailsKey ? row[detailsKey] || '' : '').trim();
 
           const id='txn_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
           // Duplicate check: same date + amount + direction, with a fuzzy desc match
           // (description text varies between export formats, e.g. "G. Bijsterbosch" vs "Betaling van G. Bijsterbosch NL13...")
-          if(isDuplicateTxn(dateStr, amt, isIn, descClean)){skipped++;continue;}
+          const duplicate = findINGDuplicate(existing, matched, dateStr, amt, isIn ? 'in' : 'out', descClean, bankDetails);
+          if (duplicate) { matched.add(duplicate.id); skipped++; continue; }
           transactions.push({
-            id, date:dateStr, desc:descClean, amount:amt,
+            id, date:dateStr, desc:descClean, bankDetails, amount:amt,
             type:isIn?'in':'out',
             category:isIn?CATEGORIES_IN[0]:CATEGORIES_OUT[0],
             receiptId:null
