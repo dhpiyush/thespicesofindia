@@ -39,6 +39,7 @@ let receipts = [];
 let pendingReceipts = [];
 let pendingTasks = []; // receipt↔transaction conflicts needing manual resolution
 let lastMatchJobRun = null; // ISO timestamp — gates the once-a-day auto-match job
+let vatFrom = null; // YYYY-MM-DD the business left KOR and became VAT-liable; null = still in KOR
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -96,6 +97,7 @@ async function loadFromDrive() {
       receipts = data.receipts || [];
       pendingTasks = data.pendingTasks || [];
       lastMatchJobRun = data.lastMatchJobRun || null;
+      vatFrom = data.vatFrom || null;
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -141,7 +143,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -307,7 +309,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -335,6 +337,7 @@ function showPage(id, btn) {
   if (id==='receipts') renderReceipts();
   if (id==='pending') renderPending();
   if (id==='pl') renderPL();
+  if (id==='vat') renderVAT();
   if (id==='quickupload') renderQuickUpload();
   if (id==='settings') renderSettings();
 }
@@ -549,13 +552,47 @@ function renderTransactions() {
   }).sort((a,b)=>b.date.localeCompare(a.date));
   const wrap=$('txn-table-wrap');
   if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
-  wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
+  wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>VAT</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
     const linked=receipts.find(r=>r.id===t.receiptId);
-    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
+    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td>${vatSelect(t)}</td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
   }).join('')}</tbody></table>`;
 }
 
 function updateCat(id,cat){const t=transactions.find(t=>t.id===id);if(t){t.category=cat;saveTxns();renderDashboard();}}
+
+// ─── VAT ─────────────────────────────────────────────
+// Every amount is stored incl. VAT; the rate lives on the transaction (t.vatRate, a percentage).
+// Unset → DEFAULT_VAT_RATE. Private transfers never carry VAT. VAT only counts towards the P&L
+// and the VAT return from vatFrom onwards — before that the business is in KOR (VAT-exempt),
+// so VAT on expenses is a cost and nothing is charged on sales.
+const DEFAULT_VAT_RATE = 9;
+const VAT_RATES = [0, 9, 21];
+const KOR_LIMIT = 20000;
+const vatRateOf = t => isPrivate(t) ? 0 : (t.vatRate != null ? t.vatRate : DEFAULT_VAT_RATE);
+const vatOf = t => { const r = vatRateOf(t); return t.amount * r / (100 + r); };
+const isVatLiable = t => !!vatFrom && t.date >= vatFrom;
+// Amount used in the P&L: excl. VAT once VAT-liable, otherwise the full amount paid/received.
+const plAmount = t => isVatLiable(t) ? t.amount - vatOf(t) : t.amount;
+
+function vatSelect(t){
+  if(isPrivate(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
+  const r=vatRateOf(t);
+  const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
+  return `<select class="cat-select" style="width:auto" onchange="updateVat('${t.id}',this)">${opts.map(o=>`<option value="${o}"${o===r?' selected':''}>${o}%</option>`).join('')}<option value="custom">Other…</option></select>`;
+}
+
+function updateVat(id,sel){
+  const t=transactions.find(t=>t.id===id); if(!t) return;
+  let rate=sel.value;
+  if(rate==='custom'){
+    const input=prompt('VAT rate for this transaction (%):', vatRateOf(t));
+    const val=input===null?NaN:parseAmountInput(input);
+    if(isNaN(val)||val<0||val>100){ if(input!==null) alert('Please enter a percentage between 0 and 100.'); sel.outerHTML=vatSelect(t); return; }
+    rate=val;
+  }
+  t.vatRate=Number(rate);
+  saveTxns(); renderTransactions(); renderDashboard();
+}
 
 // ─── DASHBOARD ───────────────────────────────────────
 const isPrivate = t => PRIVATE_CATEGORIES.includes(t.category);
@@ -602,12 +639,14 @@ function renderPL() {
   const all=plMonth==='all'?transactions:transactions.filter(t=>t.date && t.date.startsWith(plMonth));
   // Exclude private categories from P&L
   const filtered=all.filter(t=>!isPrivate(t));
-  const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0);
-  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0);
+  const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
+  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0);
+  const liable=filtered.filter(isVatLiable).length;
+  $('pl-subtitle').textContent=!liable?'By category — KOR-exempt, amounts incl. VAT':liable===filtered.length?'By category — amounts excl. VAT':`By category — excl. VAT from ${vatFrom}, incl. VAT before (KOR)`;
   $('pl-income').textContent=fmtEur(income,true);$('pl-expense').textContent=fmtEur(expense,true);$('pl-profit').textContent=fmtEur(income-expense,true);
   const byCat=(type,container)=>{
     const cats={};
-    filtered.filter(t=>t.type===type).forEach(t=>{cats[t.category]=(cats[t.category]||0)+t.amount;});
+    filtered.filter(t=>t.type===type).forEach(t=>{cats[t.category]=(cats[t.category]||0)+plAmount(t);});
     const total=Object.values(cats).reduce((s,v)=>s+v,0)||1;
     const rows=Object.entries(cats).sort((a,b)=>b[1]-a[1]);
     $(container).innerHTML=rows.length?rows.map(([cat,val])=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1;font-size:13px">${esc(cat)}</div><div style="width:80px;height:6px;background:var(--paper2);border-radius:3px;overflow:hidden;flex-shrink:0"><div style="height:100%;width:${Math.round(val/total*100)}%;background:${type==='in'?'var(--green)':'var(--red)'};border-radius:3px"></div></div><div style="font-family:var(--font-mono);font-size:13px;min-width:80px;text-align:right;color:${type==='in'?'var(--green)':'var(--red)'}">${fmtEur(val,true)}</div></div>`).join(''):'<div class="empty" style="padding:1rem"><p>No data for this period</p></div>';
@@ -626,13 +665,91 @@ function setPLMonth(m,btn){plMonth=m;document.querySelectorAll('.month-tab').for
 
 function exportCSV(){
   const filtered=plMonth==='all'?transactions:transactions.filter(t=>t.date.startsWith(plMonth));
-  const rows=[['Date','Description','Category','Type','Amount']];
-  filtered.sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{rows.push([t.date,t.desc,t.category,t.type==='in'?'Revenue':'Expense',(t.type==='out'?'-':'')+t.amount.toFixed(2)]);});
+  const rows=[['Date','Description','Category','Type','Amount','VAT rate %','VAT','Amount excl. VAT']];
+  filtered.sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{const sign=t.type==='out'?'-':'';rows.push([t.date,t.desc,t.category,t.type==='in'?'Revenue':'Expense',sign+t.amount.toFixed(2),vatRateOf(t),sign+vatOf(t).toFixed(2),sign+(t.amount-vatOf(t)).toFixed(2)]);});
   const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download=`kitchen-books${plMonth!=='all'?'_'+plMonth:''}.csv`;a.click();
   URL.revokeObjectURL(url);
+}
+
+// ─── VAT RETURN ──────────────────────────────────────
+let vatQuarter = null; // 'YYYY-Qn'
+const quarterOf = d => d.slice(0,4)+'-Q'+(Math.floor((parseInt(d.slice(5,7),10)-1)/3)+1);
+
+function renderVAT(){
+  const quarters=[...new Set(transactions.filter(t=>/^\d{4}-\d{2}/.test(t.date||'')).map(t=>quarterOf(t.date)))].sort();
+  if(!vatQuarter||!quarters.includes(vatQuarter)) vatQuarter=quarters[quarters.length-1]||null;
+  $('vat-quarters').innerHTML=quarters.map(q=>`<button class="month-tab${q===vatQuarter?' active':''}" onclick="vatQuarter='${q}';renderVAT()">${q.replace('-',' ')}</button>`).join('');
+
+  // KOR limit tracker: business revenue this calendar year vs the €20,000 limit.
+  const year=new Date().getFullYear().toString();
+  const revenue=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(year)).reduce((s,t)=>s+t.amount,0);
+  const pct=Math.min(revenue/KOR_LIMIT*100,100);
+  const korColor=pct>=100?'var(--red)':pct>=80?'#D97706':'var(--green)';
+  $('vat-kor').innerHTML=vatFrom
+    ?`<p style="font-size:13px;color:var(--ink2)">VAT-registered from <strong>${vatFrom}</strong> (no longer in KOR). Change this in Settings.</p>`
+    :`<div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:8px"><span>Revenue ${year}</span><span style="font-family:var(--font-mono)">${fmtEur(revenue,true)} / ${fmtEur(KOR_LIMIT,true)}</span></div>
+      <div style="height:8px;background:var(--paper2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${korColor}"></div></div>
+      <p style="font-size:12px;color:${pct>=80?korColor:'var(--ink3)'};margin-top:8px">${pct>=100?'Over the KOR limit — VAT applies from the sale that crossed it. Contact your accountant and set the date in Settings.':pct>=80?`${Math.round(pct)}% of the KOR limit used — ${fmtEur(KOR_LIMIT-revenue,true)} left this year.`:`${fmtEur(KOR_LIMIT-revenue,true)} left before the KOR limit.`}</p>`;
+
+  const wrap=$('vat-return');
+  if(!vatQuarter){wrap.innerHTML='<div class="empty"><p>No transactions yet</p></div>';return;}
+  const inQ=transactions.filter(t=>t.date&&quarterOf(t.date)===vatQuarter&&!isPrivate(t));
+  const liable=inQ.filter(isVatLiable);
+  // Before vatFrom the figures are a preview: what the return would be without KOR.
+  const rows=liable.length?liable:inQ;
+  const preview=!liable.length;
+  const sales=rows.filter(t=>t.type==='in'), purchases=rows.filter(t=>t.type==='out');
+  const sum=(list,f)=>list.reduce((s,t)=>s+f(t),0);
+  const byRate=(list,test)=>list.filter(t=>test(vatRateOf(t)));
+  const line=(box,label,list)=>`<tr><td style="font-family:var(--font-mono);font-size:12px;color:var(--ink3)">${box}</td><td style="font-size:13px">${label}</td><td style="text-align:right;font-family:var(--font-mono);font-size:13px">${fmtEur(sum(list,t=>t.amount-vatOf(t)))}</td><td style="text-align:right;font-family:var(--font-mono);font-size:13px">${fmtEur(sum(list,vatOf))}</td></tr>`;
+  const due=sum(sales,vatOf), input=sum(purchases,vatOf), net=due-input;
+  wrap.innerHTML=`
+    ${preview?`<div style="font-size:12px;background:#FFFBEB;color:#92400E;border-radius:var(--radius);padding:10px 12px;margin-bottom:12px">Preview only — in KOR for this quarter, so no VAT return is due and VAT on expenses can't be reclaimed. Shows what the return would be without KOR.</div>`:''}
+    ${!preview&&liable.length<inQ.length?`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">Only transactions from ${vatFrom} are included (${inQ.length-liable.length} earlier ones were under KOR).</div>`:''}
+    <table style="width:100%"><thead><tr><th style="width:44px">Box</th><th></th><th style="text-align:right">Excl. VAT</th><th style="text-align:right">VAT</th></tr></thead><tbody>
+      ${line('1a','Sales at 21%',byRate(sales,r=>r===21))}
+      ${line('1b','Sales at 9%',byRate(sales,r=>r===9))}
+      ${line('1c','Sales at other rates',byRate(sales,r=>r!==21&&r!==9&&r!==0))}
+      ${line('1e','Sales at 0% / not taxed',byRate(sales,r=>r===0))}
+      <tr><td style="font-family:var(--font-mono);font-size:12px;color:var(--ink3)">5b</td><td style="font-size:13px">VAT on expenses (input VAT)</td><td></td><td style="text-align:right;font-family:var(--font-mono);font-size:13px;white-space:nowrap">− ${fmtEur(input)}</td></tr>
+      <tr><td></td><td style="font-size:13px;font-weight:600">${net>=0?'VAT to pay':'VAT to get back'}</td><td></td><td style="text-align:right;font-family:var(--font-mono);font-size:14px;font-weight:600;color:${net>=0?'var(--red)':'var(--green)'}">${fmtEur(Math.abs(net))}</td></tr>
+    </tbody></table>
+    <p style="font-size:11px;color:var(--ink3);margin-top:10px">Calculated from each transaction's VAT rate (default ${DEFAULT_VAT_RATE}%). The Belastingdienst return uses whole euros, rounded down.</p>`;
+}
+
+// Labels around the app that say whether the business is in KOR (sidebar, dashboard, settings).
+function renderVatStatusLabels(){
+  const set=(sel,text)=>document.querySelectorAll(sel).forEach(el=>el.textContent=text);
+  set('.vat-status-short',vatFrom?'VAT-registered':'KOR');
+  set('.vat-status-tag',vatFrom?'Incl. VAT':'KOR · no VAT');
+  set('.vat-status-long',vatFrom?`VAT-registered from ${vatFrom}`:'KOR-exempt · no BTW');
+}
+
+function renderVatSettings(){
+  renderVatStatusLabels();
+  const box=$('settings-kor'), date=$('settings-vat-from');
+  if(!box) return;
+  box.checked=!vatFrom;
+  date.value=vatFrom||'';
+  $('settings-vat-from-row').style.display=vatFrom?'block':'none';
+}
+
+function setKor(inKor){
+  if(inKor){
+    if(vatFrom&&!confirm('Mark the business as in KOR again? VAT will no longer be counted in the P&L and VAT return.')){renderVatSettings();return;}
+    vatFrom=null;
+  } else {
+    vatFrom=new Date().toISOString().slice(0,10);
+  }
+  renderVatSettings(); saveToDrive(); renderPL();
+}
+
+function setVatFrom(val){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(val)) return;
+  vatFrom=val; renderVatStatusLabels(); saveToDrive(); renderPL();
 }
 
 // ─── RECEIPTS ────────────────────────────────────────
@@ -1021,6 +1138,7 @@ function loadSavedFolder(){
   if(savedId&&savedName){ folderId=savedId; folderName=savedName; applyFolderToUI(); }
 }
 function renderSettings(){
+  renderVatSettings();
   const nameEl=$('settings-folder-name');
   const idEl=$('settings-folder-id');
   const badge=$('settings-folder-badge');
@@ -1077,7 +1195,7 @@ function fmtMonth(m){
 }
 function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();}
+function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();renderVatSettings();}
 
 // ─── AUTO SYNC ───────────────────────────────────────
 let autoSyncInterval = null;
@@ -1109,6 +1227,7 @@ function startAutoSync() {
           receipts = data.receipts || [];
           pendingTasks = data.pendingTasks || [];
           lastMatchJobRun = data.lastMatchJobRun || lastMatchJobRun;
+          vatFrom = data.vatFrom || null;
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
