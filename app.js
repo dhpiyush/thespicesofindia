@@ -828,6 +828,70 @@ async function uploadReceipt(entry){
   });
 }
 
+// ─── MONEYBIRD RECEIPTS IMPORT (one-time) ────────────
+// Takes the files + manifest.json produced by scripts/moneybird-export.js, uploads each file
+// into the Drive month folder of its receipt date, and links it to the transaction Moneybird
+// had it booked against. Re-running skips receipts already imported (by moneybirdId).
+async function importMoneybirdReceipts(input){
+  if(!accessToken){alert('Please sign in first.');return;}
+  const files=[...input.files];
+  const manifestFile=files.find(f=>f.name==='manifest.json');
+  if(!manifestFile){alert('Select all files in moneybird-export/files, including manifest.json.');input.value='';return;}
+  let manifest;
+  try{manifest=JSON.parse(await manifestFile.text());}catch(e){alert('Could not read manifest.json: '+e.message);input.value='';return;}
+  const byName={};files.forEach(f=>byName[f.name]=f);
+
+  const todo=manifest.filter(e=>!receipts.some(r=>r.moneybirdId===e.moneybirdId));
+  let uploaded=0,linked=0,failed=[],missing=[];
+  for(const e of todo){
+    const file=byName[e.file];
+    if(!file){missing.push(e.file);continue;}
+    showSyncStatus('saving',`Importing Moneybird receipts… ${uploaded+1}/${todo.length}`);
+    let targetId=folderId;
+    if(folderId){try{targetId=await getOrCreateMonthFolder(folderId,(e.date||'').slice(0,7)||undefined);}catch(err){}}
+    const meta={name:e.file,mimeType:e.contentType||file.type||'application/octet-stream'};
+    if(targetId)meta.parents=[targetId];
+    const form=new FormData();
+    form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+    form.append('file',file);
+    const res=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',{method:'POST',headers:{Authorization:'Bearer '+accessToken},body:form});
+    if(!res.ok){failed.push(e.file);continue;}
+    const resp=await res.json();
+    const receipt={id:'mb_'+e.moneybirdId,name:e.file,url:resp.webViewLink,date:e.date,driveId:resp.id,amount:e.amount,moneybirdId:e.moneybirdId};
+    receipts.push(receipt);
+    uploaded++;
+    if(linkMoneybirdReceipt(receipt,e.mutations||[])) linked++;
+  }
+  // Receipts Moneybird had no bank link for go through the normal amount matcher.
+  matchReceiptsToTransactions();
+  await saveToDrive();
+  renderReceipts();renderTransactions();renderDashboard();renderPending();
+
+  let msg=`✓ ${uploaded} Moneybird receipts uploaded to Drive\n${linked} linked to the same transaction as in Moneybird`;
+  if(manifest.length>todo.length) msg+=`\n${manifest.length-todo.length} already imported earlier (skipped)`;
+  if(missing.length) msg+=`\n\n${missing.length} files listed in manifest.json weren't selected:\n${missing.slice(0,10).join('\n')}`;
+  if(failed.length) msg+=`\n\n${failed.length} uploads failed — run the import again to retry:\n${failed.slice(0,10).join('\n')}`;
+  alert(msg);
+  input.value='';
+}
+
+// Link to the transaction matching the bank mutation Moneybird booked this receipt against:
+// same date, amount and direction; if several, narrow by counterparty/description text.
+function linkMoneybirdReceipt(receipt,mutations){
+  const norm=s=>(s||'').toLowerCase().replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  for(const m of mutations){
+    const type=m.amount<0?'out':'in';
+    let cands=transactions.filter(t=>!t.receiptId&&t.date===m.date&&t.type===type&&Math.abs(t.amount-Math.abs(m.amount))<0.01);
+    if(cands.length>1){
+      const keys=[m.contra,m.message].map(norm).filter(Boolean);
+      const narrowed=cands.filter(t=>{const d=norm(t.desc+' '+(t.bankDetails||''));return keys.some(k=>d.includes(k)||k.includes(d));});
+      if(narrowed.length) cands=narrowed;
+    }
+    if(cands.length===1){cands[0].receiptId=receipt.id;return true;}
+  }
+  return false;
+}
+
 // Edit the amount on an already-uploaded receipt (e.g. to fix a typo made at upload time).
 // Drops any open pending task for it, since that task's candidates were computed off the old
 // amount, then re-runs matching immediately so the corrected amount gets a fresh chance to link.
@@ -1048,8 +1112,8 @@ function renderSettings(){
   }
 }
 
-async function getOrCreateMonthFolder(parentId){
-  const m=new Date().toISOString().slice(0,7);
+async function getOrCreateMonthFolder(parentId,month){
+  const m=month||new Date().toISOString().slice(0,7);
   if(monthFolderCache[m])return monthFolderCache[m];
   const q=encodeURIComponent(`name='${m}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentId?` and '${parentId}' in parents`:''}`);
   const res=await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,{headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
