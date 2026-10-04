@@ -252,10 +252,6 @@
         <input type="file" id="receipt-input" multiple accept=".pdf,.jpg,.jpeg,.png,.heic,.webp" onchange="addReceipts(this.files)"/>
         <div class="receipt-list" id="receipt-list"></div>
         <div class="row mt-4" style="justify-content:flex-end">
-          <label class="btn btn-secondary btn-sm" style="cursor:pointer;margin-right:auto" title="Select all files in moneybird-export/files (incl. manifest.json)">
-            Import from Moneybird export
-            <input type="file" multiple onchange="importMoneybirdReceipts(this)"/>
-          </label>
           <button class="btn btn-secondary btn-sm" onclick="clearDoneReceipts()">Clear completed</button>
           <button class="btn btn-primary" id="upload-receipts-btn" onclick="uploadAllReceipts(false)" disabled>Upload to Drive</button>
         </div>
