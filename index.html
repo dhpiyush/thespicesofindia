@@ -367,11 +367,16 @@
           <input type="checkbox" id="settings-kor" onchange="setKor(this.checked)" style="display:inline-block;width:16px;height:16px"/>
           Business is in the KOR (small business VAT exemption)
         </label>
-        <p style="font-size:12px;color:var(--ink3);margin-top:8px;line-height:1.6">While in KOR, amounts are shown incl. VAT and no VAT return is due. Each transaction still has a VAT rate (default 9%) so the VAT page can preview the return.</p>
+        <p style="font-size:12px;color:var(--ink3);margin-top:8px;line-height:1.6">While in KOR, amounts are shown incl. VAT and no VAT return is due. Each transaction still has a VAT rate so the VAT page can preview the return.</p>
         <div id="settings-vat-from-row" style="display:none;margin-top:12px">
           <label style="font-size:13px;color:var(--ink2)">VAT-registered from
             <input type="date" class="filter-input" id="settings-vat-from" onchange="setVatFrom(this.value)" style="margin-left:8px"/>
           </label>
+        </div>
+        <div style="margin-top:18px">
+          <div style="font-size:13px;font-weight:500;margin-bottom:4px">Default VAT rate per category</div>
+          <p style="font-size:12px;color:var(--ink3);margin-bottom:6px;line-height:1.6">Used for every transaction in the category unless you set its rate by hand on the Transactions page. Wages, insurance and bank charges are usually 0%.</p>
+          <div id="settings-category-vat"></div>
         </div>
       </div>
 
