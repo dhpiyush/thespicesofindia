@@ -40,6 +40,7 @@ let pendingReceipts = [];
 let pendingTasks = []; // receipt↔transaction conflicts needing manual resolution
 let lastMatchJobRun = null; // ISO timestamp — gates the once-a-day auto-match job
 let vatFrom = null; // YYYY-MM-DD the business left KOR and became VAT-liable; null = still in KOR
+let categoryVat = {}; // category → default VAT rate (%); categories not listed use DEFAULT_VAT_RATE
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -98,6 +99,7 @@ async function loadFromDrive() {
       pendingTasks = data.pendingTasks || [];
       lastMatchJobRun = data.lastMatchJobRun || null;
       vatFrom = data.vatFrom || null;
+      categoryVat = data.categoryVat || {};
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -143,7 +145,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -309,7 +311,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -561,14 +563,15 @@ function renderTransactions() {
 function updateCat(id,cat){const t=transactions.find(t=>t.id===id);if(t){t.category=cat;saveTxns();renderDashboard();}}
 
 // ─── VAT ─────────────────────────────────────────────
-// Every amount is stored incl. VAT; the rate lives on the transaction (t.vatRate, a percentage).
-// Unset → DEFAULT_VAT_RATE. Private transfers never carry VAT. VAT only counts towards the P&L
+// Every amount is stored incl. VAT. Rate lookup: the transaction's own t.vatRate (set by hand),
+// else its category's default from Settings (categoryVat), else DEFAULT_VAT_RATE. Private transfers never carry VAT. VAT only counts towards the P&L
 // and the VAT return from vatFrom onwards — before that the business is in KOR (VAT-exempt),
 // so VAT on expenses is a cost and nothing is charged on sales.
 const DEFAULT_VAT_RATE = 9;
 const VAT_RATES = [0, 9, 21];
 const KOR_LIMIT = 20000;
-const vatRateOf = t => isPrivate(t) ? 0 : (t.vatRate != null ? t.vatRate : DEFAULT_VAT_RATE);
+const categoryVatRate = cat => categoryVat[cat] != null ? categoryVat[cat] : DEFAULT_VAT_RATE;
+const vatRateOf = t => isPrivate(t) ? 0 : (t.vatRate != null ? t.vatRate : categoryVatRate(t.category));
 const vatOf = t => { const r = vatRateOf(t); return t.amount * r / (100 + r); };
 const isVatLiable = t => !!vatFrom && t.date >= vatFrom;
 // Amount used in the P&L: excl. VAT once VAT-liable, otherwise the full amount paid/received.
@@ -578,12 +581,15 @@ function vatSelect(t){
   if(isPrivate(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
   const r=vatRateOf(t);
   const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
-  return `<select class="cat-select" style="width:auto" onchange="updateVat('${t.id}',this)">${opts.map(o=>`<option value="${o}"${o===r?' selected':''}>${o}%</option>`).join('')}<option value="custom">Other…</option></select>`;
+  // A hand-set rate that differs from the category default shows in bold; "Use category default" clears it.
+  const overridden=t.vatRate!=null&&t.vatRate!==categoryVatRate(t.category);
+  return `<select class="cat-select" style="width:auto${overridden?';font-weight:600':''}" title="${overridden?'Set by hand':'Category default'}" onchange="updateVat('${t.id}',this)">${opts.map(o=>`<option value="${o}"${o===r?' selected':''}>${o}%</option>`).join('')}<option value="custom">Other…</option>${t.vatRate!=null?`<option value="default">Use category default (${categoryVatRate(t.category)}%)</option>`:''}</select>`;
 }
 
 function updateVat(id,sel){
   const t=transactions.find(t=>t.id===id); if(!t) return;
   let rate=sel.value;
+  if(rate==='default'){ delete t.vatRate; saveTxns(); renderTransactions(); renderDashboard(); return; }
   if(rate==='custom'){
     const input=prompt('VAT rate for this transaction (%):', vatRateOf(t));
     const val=input===null?NaN:parseAmountInput(input);
@@ -730,6 +736,7 @@ function renderVatStatusLabels(){
 
 function renderVatSettings(){
   renderVatStatusLabels();
+  renderCategoryVat();
   const box=$('settings-kor'), date=$('settings-vat-from');
   if(!box) return;
   box.checked=!vatFrom;
@@ -745,6 +752,42 @@ function setKor(inKor){
     vatFrom=new Date().toISOString().slice(0,10);
   }
   renderVatSettings(); saveToDrive(); renderPL();
+}
+
+// Settings → default VAT rate per category. Applies to every transaction in the category that
+// has no hand-set rate; hand-set ones can optionally be reset to the new default.
+function renderCategoryVat(){
+  const wrap=$('settings-category-vat'); if(!wrap) return;
+  const cats=[...CATEGORIES_IN,...CATEGORIES_OUT].filter(c=>!PRIVATE_CATEGORIES.includes(c));
+  // Also list categories that only exist in imported data (e.g. unmapped Moneybird ones).
+  transactions.forEach(t=>{if(!cats.includes(t.category)&&!PRIVATE_CATEGORIES.includes(t.category))cats.push(t.category);});
+  wrap.innerHTML=cats.map(c=>{
+    const r=categoryVatRate(c);
+    const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
+    const n=transactions.filter(t=>t.category===c).length;
+    return `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1;font-size:13px">${esc(c)} <span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">${n}</span></div>
+      <select class="cat-select" style="width:auto" data-cat="${esc(c)}" onchange="setCategoryVat(this)">${opts.map(o=>`<option value="${o}"${o===r?' selected':''}>${o}%</option>`).join('')}<option value="custom">Other…</option></select>
+    </div>`;
+  }).join('');
+}
+
+function setCategoryVat(sel){
+  const cat=sel.dataset.cat;
+  let rate=sel.value;
+  if(rate==='custom'){
+    const input=prompt(`Default VAT rate for "${cat}" (%):`, categoryVatRate(cat));
+    const val=input===null?NaN:parseAmountInput(input);
+    if(isNaN(val)||val<0||val>100){ if(input!==null) alert('Please enter a percentage between 0 and 100.'); renderCategoryVat(); return; }
+    rate=val;
+  }
+  rate=Number(rate);
+  if(rate===DEFAULT_VAT_RATE) delete categoryVat[cat]; else categoryVat[cat]=rate;
+  const handSet=transactions.filter(t=>t.category===cat&&t.vatRate!=null&&t.vatRate!==rate);
+  if(handSet.length&&confirm(`${handSet.length} "${cat}" transaction${handSet.length>1?'s have':' has'} a VAT rate set by hand. Change ${handSet.length>1?'them':'it'} to ${rate}% too?`)){
+    handSet.forEach(t=>delete t.vatRate);
+  }
+  saveToDrive(); renderCategoryVat(); renderTransactions(); renderPL();
 }
 
 function setVatFrom(val){
@@ -1228,6 +1271,7 @@ function startAutoSync() {
           pendingTasks = data.pendingTasks || [];
           lastMatchJobRun = data.lastMatchJobRun || lastMatchJobRun;
           vatFrom = data.vatFrom || null;
+          categoryVat = data.categoryVat || {};
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
