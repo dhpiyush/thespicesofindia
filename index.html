@@ -222,7 +222,13 @@
         <select class="filter-input" id="filter-cat" onchange="renderTransactions()">
           <option value="">All categories</option>
         </select>
+        <select class="filter-input" id="filter-receipt" onchange="renderTransactions()">
+          <option value="">Linked &amp; unlinked</option>
+          <option value="linked">Receipt linked</option>
+          <option value="unlinked">No receipt</option>
+        </select>
       </div>
+      <div id="txn-count" style="font-size:12px;color:var(--ink3);font-family:var(--font-mono);margin:-4px 0 10px"></div>
       <div class="card" style="padding:0;overflow:hidden">
         <div class="tbl-wrap" id="txn-table-wrap">
           <div class="empty"><div class="empty-icon">📂</div><h3>No transactions</h3><p>Import your ING CSV to get started</p></div>
