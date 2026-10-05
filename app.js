@@ -546,6 +546,8 @@ function renderTransactions() {
   const typeF=$('filter-type')?.value||'';
   const monthF=$('filter-month')?.value||'';
   const catF=$('filter-cat')?.value||'';
+  const receiptF=$('filter-receipt')?.value||'';
+  const receiptIds=new Set(receipts.map(r=>r.id));
   const months=[...new Set(transactions
     .map(t=>t.date ? t.date.slice(0,7) : null)
     .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
@@ -558,10 +560,16 @@ function renderTransactions() {
     if(typeF&&t.type!==typeF)return false;
     if(monthF&&!t.date.startsWith(monthF))return false;
     if(catF&&t.category!==catF)return false;
+    if(receiptF&&(receiptF==='linked')!==receiptIds.has(t.receiptId))return false;
     if(search&&!t.desc.toLowerCase().includes(search)&&!t.category.toLowerCase().includes(search))return false;
     return true;
   }).sort((a,b)=>b.date.localeCompare(a.date));
   const wrap=$('txn-table-wrap');
+  const total=(type)=>filtered.filter(t=>t.type===type).reduce((s,t)=>s+t.amount,0);
+  const filtering=search||typeF||monthF||catF||receiptF;
+  $('txn-count').textContent=transactions.length
+    ?`${filtering?`${filtered.length} of ${transactions.length}`:transactions.length} transaction${transactions.length===1?'':'s'} · +€ ${fmtEur(total('in'))} · −€ ${fmtEur(total('out'))}`
+    :'';
   if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
   wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>VAT</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
     const linked=receipts.find(r=>r.id===t.receiptId);
