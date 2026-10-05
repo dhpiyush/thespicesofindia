@@ -42,6 +42,7 @@ let lastMatchJobRun = null; // ISO timestamp — gates the once-a-day auto-match
 let vatFrom = null; // YYYY-MM-DD the business left KOR and became VAT-liable; null = still in KOR
 let categoryVat = {}; // category → default VAT rate (%); categories not listed use DEFAULT_VAT_RATE
 let lockedQuarters = {}; // 'YYYY-Qn' → { lockedAt, vatNet } — closed quarters can't be edited
+let assets = []; // asset register: { id, name, purchaseDate, cost, lifeYears, residual, disposedDate, txnId }
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -102,6 +103,7 @@ async function loadFromDrive() {
       vatFrom = data.vatFrom || null;
       categoryVat = data.categoryVat || {};
       lockedQuarters = data.lockedQuarters || {};
+      assets = data.assets || [];
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -147,7 +149,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -314,7 +316,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -343,6 +345,7 @@ function showPage(id, btn) {
   if (id==='pending') renderPending();
   if (id==='pl') renderPL();
   if (id==='vat') renderVAT();
+  if (id==='yearend') renderYearEnd();
   if (id==='quickupload') renderQuickUpload();
   if (id==='settings') renderSettings();
 }
@@ -562,7 +565,7 @@ function renderTransactions() {
   if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
   wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>VAT</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
     const linked=receipts.find(r=>r.id===t.receiptId);
-    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td>${isLockedDate(t.date)?`<span class="badge badge-cat" title="Quarter is locked">🔒 ${esc(t.category)}</span>`:`<select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select>`}</td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td>${vatSelect(t)}</td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
+    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td>${isLockedDate(t.date)?`<span class="badge badge-cat" title="Quarter is locked">🔒 ${esc(t.category)}</span>`:`<select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select>`}${assetOfTxn(t)?` <span class="badge badge-cat" title="Booked as an asset: depreciated instead of counted as a cost">🏷️ Asset</span>`:''}</td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td>${vatSelect(t)}</td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
   }).join('')}</tbody></table>`;
 }
 
@@ -651,16 +654,19 @@ function renderPL() {
   )].sort()];
   $('pl-months').innerHTML=months.map(m=>`<button class="month-tab${m===plMonth?' active':''}" onclick="setPLMonth('${m}',this)">${m==='all'?'Full year':fmtMonth(m)}</button>`).join('');
   const all=plMonth==='all'?transactions:transactions.filter(t=>t.date && t.date.startsWith(plMonth));
-  // Exclude private categories from P&L
-  const filtered=all.filter(t=>!isPrivate(t));
+  // Exclude private categories and asset purchases (those are depreciated instead) from P&L
+  const filtered=all.filter(t=>!isPrivate(t)&&!assetOfTxn(t));
+  const plMonths=plMonth==='all'?months.slice(1):[plMonth];
+  const dep=plMonths.length?depreciationBetween(monthIndex(plMonths[0]+'-01'),monthIndex(plMonths[plMonths.length-1]+'-01')):0;
   const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
-  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0);
+  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0)+dep;
   const liable=filtered.filter(isVatLiable).length;
   $('pl-subtitle').textContent=!liable?'By category — KOR-exempt, amounts incl. VAT':liable===filtered.length?'By category — amounts excl. VAT':`By category — excl. VAT from ${vatFrom}, incl. VAT before (KOR)`;
   $('pl-income').textContent=fmtEur(income,true);$('pl-expense').textContent=fmtEur(expense,true);$('pl-profit').textContent=fmtEur(income-expense,true);
   const byCat=(type,container)=>{
     const cats={};
     filtered.filter(t=>t.type===type).forEach(t=>{cats[t.category]=(cats[t.category]||0)+plAmount(t);});
+    if(type==='out'&&dep>0) cats['Depreciation']=dep;
     const total=Object.values(cats).reduce((s,v)=>s+v,0)||1;
     const rows=Object.entries(cats).sort((a,b)=>b[1]-a[1]);
     $(container).innerHTML=rows.length?rows.map(([cat,val])=>`<div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)"><div style="flex:1;font-size:13px">${esc(cat)}</div><div style="width:80px;height:6px;background:var(--paper2);border-radius:3px;overflow:hidden;flex-shrink:0"><div style="height:100%;width:${Math.round(val/total*100)}%;background:${type==='in'?'var(--green)':'var(--red)'};border-radius:3px"></div></div><div style="font-family:var(--font-mono);font-size:13px;min-width:80px;text-align:right;color:${type==='in'?'var(--green)':'var(--red)'}">${fmtEur(val,true)}</div></div>`).join(''):'<div class="empty" style="padding:1rem"><p>No data for this period</p></div>';
@@ -984,10 +990,183 @@ async function restoreBackup(id,name){
   if(!confirm(`Restore "${name}"?\n\nIt has ${data.transactions.length} transactions and ${(data.receipts||[]).length} receipts (you now have ${transactions.length} and ${receipts.length}).\n\nYour current data is backed up first, so this can be undone.`)) return;
   if(!await backupNow('before-restore')){ alert('Could not back up the current data, so nothing was restored.'); return; }
   transactions=data.transactions; receipts=data.receipts||[]; pendingTasks=data.pendingTasks||[];
-  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{};
+  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[];
   await saveToDrive();
   refreshAll(); renderBackups();
   alert('Backup restored.');
+}
+
+// ─── ASSETS & DEPRECIATION ───────────────────────────
+// Equipment and other purchases that last longer than a year are booked as assets: the purchase
+// transaction (if linked via t.assetId) leaves the P&L, and the cost is spread as straight-line
+// depreciation per month from the purchase month over lifeYears, down to the residual value.
+// Cost is what the books carry: incl. VAT while in KOR, excl. VAT once VAT-registered.
+const ASSET_MIN_COST = 450;
+const monthIndex = d => parseInt(d.slice(0,4),10)*12 + parseInt(d.slice(5,7),10) - 1;
+const assetOfTxn = t => t.assetId ? assets.find(a=>a.id===t.assetId) : null;
+
+function assetDepreciation(a, from, to){
+  const start=monthIndex(a.purchaseDate), months=Math.round(a.lifeYears*12);
+  let end=start+months-1;
+  if(a.disposedDate) end=Math.min(end,monthIndex(a.disposedDate));
+  const n=Math.max(0,Math.min(to,end)-Math.max(from,start)+1);
+  return n*(a.cost-(a.residual||0))/months;
+}
+const depreciationBetween = (from,to) => assets.reduce((s,a)=>s+assetDepreciation(a,from,to),0);
+// Book value at the end of month `at` (0 once disposed).
+function bookValue(a, at){
+  if(at<monthIndex(a.purchaseDate)) return null;
+  if(a.disposedDate&&monthIndex(a.disposedDate)<=at) return 0;
+  return a.cost-assetDepreciation(a,monthIndex(a.purchaseDate),at);
+}
+
+// Default cost for an asset bought via this transaction.
+const assetCostFromTxn = t => +(isVatLiable(t) ? t.amount - vatOf(t) : t.amount).toFixed(2);
+
+let editingAssetId = null;
+
+function openAssetForm(id){
+  editingAssetId=id||null;
+  const a=id?assets.find(a=>a.id===id):null;
+  const linkable=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&(!t.assetId||(a&&t.id===a.txnId))&&t.amount>=50)
+    .sort((x,y)=>y.amount-x.amount).slice(0,300);
+  $('asset-txn').innerHTML='<option value="">— Not linked (paid privately or before using the app) —</option>'+linkable.map(t=>`<option value="${t.id}"${a&&a.txnId===t.id?' selected':''}>${t.date} · € ${fmtEur(t.amount)} · ${esc(t.desc.slice(0,40))}</option>`).join('');
+  $('asset-name').value=a?a.name:'';
+  $('asset-date').value=a?a.purchaseDate:'';
+  $('asset-cost').value=a?a.cost:'';
+  $('asset-life').value=a?a.lifeYears:5;
+  $('asset-residual').value=a?(a.residual||0):0;
+  $('asset-disposed').value=a?(a.disposedDate||''):'';
+  $('asset-form-title').textContent=a?'Edit asset':'Add asset';
+  $('asset-delete').style.display=a?'inline-flex':'none';
+  $('asset-form').style.display='block';
+  $('asset-form').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function closeAssetForm(){ $('asset-form').style.display='none'; editingAssetId=null; }
+
+// Picking a transaction prefills date, cost and a name.
+function assetTxnChanged(id){
+  const t=transactions.find(t=>t.id===id); if(!t) return;
+  $('asset-date').value=t.date;
+  $('asset-cost').value=assetCostFromTxn(t);
+  if(!$('asset-name').value) $('asset-name').value=t.desc.slice(0,40);
+}
+
+function saveAsset(){
+  const name=$('asset-name').value.trim(), date=$('asset-date').value, cost=parseAmountInput($('asset-cost').value);
+  const life=parseAmountInput($('asset-life').value), residual=parseAmountInput($('asset-residual').value||'0');
+  const disposed=$('asset-disposed').value||null, txnId=$('asset-txn').value||null;
+  if(!name||!/^\d{4}-\d{2}-\d{2}$/.test(date)){ alert('Please enter a name and purchase date.'); return; }
+  if(isNaN(cost)||cost<=0){ alert('Please enter the cost.'); return; }
+  if(isNaN(life)||life<1||life>50){ alert('Useful life must be between 1 and 50 years.'); return; }
+  if(isNaN(residual)||residual<0||residual>=cost){ alert('Residual value must be 0 or more, and less than the cost.'); return; }
+  if(disposed&&disposed<date){ alert('The disposal date can\'t be before the purchase date.'); return; }
+  const old=editingAssetId?assets.find(a=>a.id===editingAssetId):null;
+  // (Un)linking a transaction changes how it counts in the P&L, so it isn't allowed in a locked quarter.
+  for(const id of [old&&old.txnId!==txnId?old.txnId:null, txnId&&(!old||old.txnId!==txnId)?txnId:null]){
+    const t=id&&transactions.find(t=>t.id===id);
+    if(t&&isLockedDate(t.date)){ alertLocked(t.date); return; }
+  }
+  if(life<5&&!confirm('Dutch tax rules usually allow at most 20% depreciation per year, which is a useful life of 5 years or more. Save with '+life+' years anyway?')) return;
+  if(cost<ASSET_MIN_COST&&!confirm(`Purchases under € ${ASSET_MIN_COST} can usually be counted as a cost straight away instead. Save as an asset anyway?`)) return;
+  const a=old||{id:'as_'+Math.random().toString(36).slice(2)};
+  if(old&&old.txnId&&old.txnId!==txnId){ const t=transactions.find(t=>t.id===old.txnId); if(t) delete t.assetId; }
+  Object.assign(a,{name,purchaseDate:date,cost,lifeYears:life,residual,disposedDate:disposed,txnId});
+  if(txnId){ const t=transactions.find(t=>t.id===txnId); if(t) t.assetId=a.id; }
+  if(!old) assets.push(a);
+  closeAssetForm(); saveToDrive(); renderYearEnd(); renderPL(); renderTransactions();
+}
+
+function deleteAsset(){
+  const a=assets.find(a=>a.id===editingAssetId); if(!a) return;
+  const t=a.txnId&&transactions.find(t=>t.id===a.txnId);
+  if(t&&isLockedDate(t.date)){ alertLocked(t.date); return; }
+  if(!confirm(`Delete "${a.name}" from the asset list?${t?' Its purchase will count as a normal cost again.':''}`)) return;
+  if(t) delete t.assetId;
+  assets=assets.filter(x=>x.id!==a.id);
+  closeAssetForm(); saveToDrive(); renderYearEnd(); renderPL(); renderTransactions();
+}
+
+function markTxnAsAsset(txnId){
+  openAssetForm(null);
+  $('asset-txn').value=txnId; assetTxnChanged(txnId);
+}
+
+// ─── YEAR-END SUMMARY ────────────────────────────────
+let yearEndYear = null;
+
+function renderYearEnd(){
+  const years=[...new Set([...transactions.map(t=>(t.date||'').slice(0,4)),...assets.map(a=>a.purchaseDate.slice(0,4))].filter(y=>/^\d{4}$/.test(y)))].sort();
+  if(!yearEndYear||!years.includes(yearEndYear)) yearEndYear=years[years.length-1]||String(new Date().getFullYear());
+  $('ye-years').innerHTML=years.map(y=>`<button class="month-tab${y===yearEndYear?' active':''}" onclick="yearEndYear='${y}';renderYearEnd()">${y}</button>`).join('');
+  const y=yearEndYear, from=monthIndex(y+'-01-01'), to=monthIndex(y+'-12-01');
+  const inYear=transactions.filter(t=>(t.date||'').startsWith(y));
+  const biz=inYear.filter(t=>!isPrivate(t)&&!assetOfTxn(t));
+  const sum=(list,f)=>list.reduce((s,t)=>s+f(t),0);
+  const revenue=sum(biz.filter(t=>t.type==='in'),plAmount);
+  const costsByCat={}; biz.filter(t=>t.type==='out').forEach(t=>costsByCat[t.category]=(costsByCat[t.category]||0)+plAmount(t));
+  const dep=depreciationBetween(from,to);
+  const costs=Object.values(costsByCat).reduce((s,v)=>s+v,0)+dep;
+  const result=revenue-costs;
+  const withdrawals=sum(inYear.filter(t=>isPrivate(t)&&t.type==='out'),t=>t.amount);
+  const deposits=sum(inYear.filter(t=>isPrivate(t)&&t.type==='in'),t=>t.amount);
+  const bought=assets.filter(a=>a.purchaseDate.startsWith(y));
+  const noReceipt=inYear.filter(t=>t.type==='out'&&!isPrivate(t)&&!t.receiptId);
+  const quarters=[1,2,3,4].map(n=>y+'-Q'+n);
+  const row=(label,val,opts={})=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px${opts.bold?';font-weight:600':''}"><span>${label}</span><span style="font-family:var(--font-mono);white-space:nowrap${opts.color?';color:'+opts.color:''}">${opts.raw||'€ '+fmtEur(val)}</span></div>`;
+
+  $('ye-summary').innerHTML=`
+    <div class="card"><div class="card-label">Profit & loss ${y}${vatFrom?'':' · incl. VAT (KOR)'}</div>
+      ${row('Revenue',revenue,{color:'var(--green)'})}
+      ${Object.entries(costsByCat).sort((a,b)=>b[1]-a[1]).map(([c,v])=>row(esc(c),v)).join('')}
+      ${row('Depreciation',dep)}
+      ${row('Total costs',costs,{bold:true,color:'var(--red)'})}
+      ${row(result>=0?'Profit':'Loss',Math.abs(result),{bold:true,color:result>=0?'var(--green)':'var(--red)'})}
+    </div>
+    <div class="card"><div class="card-label">Private (not in P&L)</div>
+      ${row('Private withdrawals',withdrawals)}
+      ${row('Private deposits',deposits)}
+      ${row('Net withdrawn',withdrawals-deposits,{bold:true})}
+    </div>
+    <div class="card"><div class="card-label">Checks for your accountant</div>
+      ${row('Expenses without a receipt',0,{raw:`${noReceipt.length} · € ${fmtEur(sum(noReceipt,t=>t.amount))}`,color:noReceipt.length?'#D97706':'var(--green)'})}
+      ${row('Quarters locked',0,{raw:quarters.map(q=>`${q.slice(5)} ${lockedQuarters[q]?'🔒':'—'}`).join('  ')})}
+      ${row('VAT status',0,{raw:vatFrom?`VAT-registered from ${vatFrom}`:'KOR'})}
+      ${row('Investments this year',sum(bought,a=>a.cost),{raw:`${bought.length} · € ${fmtEur(sum(bought,a=>a.cost))}`})}
+    </div>`;
+
+  // Asset register with this year's figures
+  const assetRows=assets.filter(a=>a.purchaseDate.slice(0,4)<=y).sort((a,b)=>a.purchaseDate.localeCompare(b.purchaseDate));
+  const startVal=a=>{const v=bookValue(a,from-1);return v==null?'—':fmtEur(v);};
+  $('ye-assets').innerHTML=assetRows.length?`<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th>Asset</th><th class="hide-sm">Bought</th><th style="text-align:right">Cost</th><th class="hide-sm" style="text-align:right">Value 1 Jan</th><th style="text-align:right">Depr.<span class="hide-sm"> ${y}</span></th><th style="text-align:right"><span class="hide-sm">Value </span>31 Dec</th><th class="no-print hide-sm"></th></tr></thead><tbody>
+    ${assetRows.map(a=>`<tr><td style="font-size:13px"><a href="#" style="color:inherit" onclick="openAssetForm('${a.id}');return false">${esc(a.name)}</a>${a.disposedDate?`<div style="font-size:11px;color:var(--ink3)">disposed ${a.disposedDate}</div>`:''}<div style="font-size:11px;color:var(--ink3)"><span class="show-sm">${a.purchaseDate} · </span>${a.lifeYears} yrs${a.residual?' · residual € '+fmtEur(a.residual):''}${a.txnId?'':' · not linked'}</div></td>
+      <td class="hide-sm" style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${a.purchaseDate}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:12px">${fmtEur(a.cost)}</td>
+      <td class="hide-sm" style="text-align:right;font-family:var(--font-mono);font-size:12px">${startVal(a)}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:12px">${fmtEur(assetDepreciation(a,from,to))}</td>
+      <td style="text-align:right;font-family:var(--font-mono);font-size:12px">${fmtEur(bookValue(a,to)||0)}</td>
+      <td class="no-print hide-sm"><button class="btn btn-secondary btn-sm" onclick="openAssetForm('${a.id}')">Edit</button></td></tr>`).join('')}
+    </tbody></table></div>`:'<p style="font-size:13px;color:var(--ink3);padding:8px 0">No assets yet.</p>';
+
+  // Suggest large expenses that may be assets
+  const candidates=inYear.filter(t=>t.type==='out'&&!isPrivate(t)&&!t.assetId&&t.amount>=ASSET_MIN_COST).sort((a,b)=>b.amount-a.amount);
+  $('ye-candidates').innerHTML=candidates.length?`<div style="font-size:12px;background:#FFFBEB;color:#92400E;border-radius:var(--radius);padding:10px 12px;margin-top:12px">
+      <div style="margin-bottom:6px">Expenses of € ${ASSET_MIN_COST} or more in ${y}. If one bought equipment or something else that lasts more than a year, mark it as an asset:</div>
+      ${candidates.map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap"><span style="font-family:var(--font-mono)">${t.date}</span><span style="font-family:var(--font-mono)">€ ${fmtEur(t.amount)}</span><span style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)} · ${esc(t.category)}</span><button class="btn btn-secondary btn-sm no-print" onclick="markTxnAsAsset('${t.id}')">Mark as asset</button></div>`).join('')}
+    </div>`:'';
+}
+
+function exportYearEndCSV(){
+  const y=yearEndYear, from=monthIndex(y+'-01-01'), to=monthIndex(y+'-12-01');
+  const rows=[['Section','Item','Date','Amount']];
+  [...$('ye-summary').querySelectorAll('.card')].forEach(card=>{
+    const section=card.querySelector('.card-label').textContent;
+    card.querySelectorAll('.card-label ~ div').forEach(r=>{const [a,b]=r.children;rows.push([section,a.textContent,'',b.textContent.replace(/€\s?/g,'').replace(/(\d),(?=\d{3}\b)/g,'$1')]);});
+  });
+  assets.filter(a=>a.purchaseDate.slice(0,4)<=y).forEach(a=>rows.push(['Assets',`${a.name} (cost ${a.cost.toFixed(2)}, ${a.lifeYears} yrs, depreciation ${assetDepreciation(a,from,to).toFixed(2)})`,a.purchaseDate,(bookValue(a,to)||0).toFixed(2)]));
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download=`year-end-${y}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
 // ─── RECEIPTS ────────────────────────────────────────
@@ -1469,6 +1648,7 @@ function startAutoSync() {
           vatFrom = data.vatFrom || null;
           categoryVat = data.categoryVat || {};
           lockedQuarters = data.lockedQuarters || {};
+          assets = data.assets || [];
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
