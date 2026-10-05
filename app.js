@@ -41,6 +41,7 @@ let pendingTasks = []; // receipt↔transaction conflicts needing manual resolut
 let lastMatchJobRun = null; // ISO timestamp — gates the once-a-day auto-match job
 let vatFrom = null; // YYYY-MM-DD the business left KOR and became VAT-liable; null = still in KOR
 let categoryVat = {}; // category → default VAT rate (%); categories not listed use DEFAULT_VAT_RATE
+let lockedQuarters = {}; // 'YYYY-Qn' → { lockedAt, vatNet } — closed quarters can't be edited
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -100,6 +101,7 @@ async function loadFromDrive() {
       lastMatchJobRun = data.lastMatchJobRun || null;
       vatFrom = data.vatFrom || null;
       categoryVat = data.categoryVat || {};
+      lockedQuarters = data.lockedQuarters || {};
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -145,7 +147,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -268,6 +270,7 @@ async function onSignedIn() {
   await fixLegacyDates();
   await scanDriveForMissingReceipts();
   await runDailyReceiptMatch();
+  await runDailyBackup();
   refreshAll();
   startAutoSync();
   showSyncStatus('ready', 'Auto-sync on · every 60s');
@@ -311,7 +314,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -374,7 +377,7 @@ function importING(input) {
           input.value=''; return;
         }
 
-        let added=0, skipped=0;
+        let added=0, skipped=0, lockedSkipped=0;
         const existing = transactions.slice(), matched = new Set();
         for (const row of rows) {
           // Amount: strip thousands separator (.) and replace decimal comma
@@ -402,6 +405,7 @@ function importING(input) {
           // (description text varies between export formats, e.g. "G. Bijsterbosch" vs "Betaling van G. Bijsterbosch NL13...")
           const duplicate = findINGDuplicate(existing, matched, dateStr, amt, isIn ? 'in' : 'out', descClean, bankDetails);
           if (duplicate) { matched.add(duplicate.id); skipped++; continue; }
+          if (isLockedDate(dateStr)) { lockedSkipped++; continue; }
           transactions.push({
             id, date:dateStr, desc:descClean, bankDetails, amount:amt,
             type:isIn?'in':'out',
@@ -411,7 +415,7 @@ function importING(input) {
           added++;
         }
         saveTxns(); renderTransactions(); renderDashboard();
-        const msg = added+' transactions imported'+(skipped>0?` · ${skipped} duplicates skipped`:'');
+        const msg = added+' transactions imported'+(skipped>0?` · ${skipped} duplicates skipped`:'')+(lockedSkipped?`\n\n${lockedSkipped} new transactions fall in a locked quarter and were NOT imported. Unlock the quarter on the VAT page first if they belong in the books.`:'');
         alert(msg);
         input.value='';
       },
@@ -446,7 +450,7 @@ function importMoneybird(input) {
 
       if (!rows.length) { alert('No transactions found in this file.'); return; }
 
-      let added = 0, skipped = 0, unmapped = new Set();
+      let added = 0, skipped = 0, lockedSkipped = 0, unmapped = new Set();
 
       for (const row of rows) {
         // Parse amount — Moneybird uses negative for debits, positive for credits
@@ -510,6 +514,7 @@ function importMoneybird(input) {
         if (isDuplicateTxn(dateStr, absAmt, isIn, desc)) {
           skipped++; continue;
         }
+        if (isLockedDate(dateStr)) { lockedSkipped++; continue; }
 
         const id = 'txn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
         transactions.push({ id, date: dateStr, desc, amount: absAmt, type: isIn ? 'in' : 'out', category, receiptId: null });
@@ -520,6 +525,7 @@ function importMoneybird(input) {
 
       let msg = `✓ ${added} transactions imported from Moneybird`;
       if (skipped) msg += `\n${skipped} duplicates skipped`;
+      if (lockedSkipped) msg += `\n\n${lockedSkipped} new transactions fall in a locked quarter and were NOT imported. Unlock the quarter on the VAT page first if they belong in the books.`;
       if (unmapped.size) msg += `\n\nUnknown categories (set to default):\n${[...unmapped].join('\n')}`;
       alert(msg);
       input.value = '';
@@ -556,11 +562,11 @@ function renderTransactions() {
   if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
   wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>VAT</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
     const linked=receipts.find(r=>r.id===t.receiptId);
-    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td>${vatSelect(t)}</td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
+    return`<tr><td style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${t.date}</td><td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td>${isLockedDate(t.date)?`<span class="badge badge-cat" title="Quarter is locked">🔒 ${esc(t.category)}</span>`:`<select class="cat-select" onchange="updateCat('${t.id}',this.value)">${(t.type==='in'?CATEGORIES_IN:CATEGORIES_OUT).map(c=>`<option${c===t.category?' selected':''}>${c}</option>`).join('')}</select>`}</td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td><td>${vatSelect(t)}</td><td><span class="badge ${t.type==='in'?'badge-in':'badge-out'}">${t.type==='in'?'Revenue':'Expense'}</span></td><td>${linked?`<a href="${linked.url}" target="_blank" class="badge badge-linked">🔗 ${esc(linked.name.slice(0,12))}…</a>`:`<button class="btn btn-secondary btn-sm" onclick="openLinkForTxn('${t.id}')">Link</button>`}</td></tr>`;
   }).join('')}</tbody></table>`;
 }
 
-function updateCat(id,cat){const t=transactions.find(t=>t.id===id);if(t){t.category=cat;saveTxns();renderDashboard();}}
+function updateCat(id,cat){const t=transactions.find(t=>t.id===id);if(!t)return;if(isLockedDate(t.date)){alertLocked(t.date);renderTransactions();return;}t.category=cat;saveTxns();renderDashboard();}
 
 // ─── VAT ─────────────────────────────────────────────
 // Every amount is stored incl. VAT. Rate lookup: the transaction's own t.vatRate (set by hand),
@@ -580,6 +586,7 @@ const plAmount = t => isVatLiable(t) ? t.amount - vatOf(t) : t.amount;
 function vatSelect(t){
   if(isPrivate(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
   const r=vatRateOf(t);
+  if(isLockedDate(t.date)) return `<span style="font-size:11px;font-family:var(--font-mono)" title="Quarter is locked">${r}%</span>`;
   const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
   // A hand-set rate that differs from the category default shows in bold; "Use category default" clears it.
   const overridden=t.vatRate!=null&&t.vatRate!==categoryVatRate(t.category);
@@ -588,6 +595,7 @@ function vatSelect(t){
 
 function updateVat(id,sel){
   const t=transactions.find(t=>t.id===id); if(!t) return;
+  if(isLockedDate(t.date)){ alertLocked(t.date); renderTransactions(); return; }
   let rate=sel.value;
   if(rate==='default'){ delete t.vatRate; saveTxns(); renderTransactions(); renderDashboard(); return; }
   if(rate==='custom'){
@@ -687,7 +695,7 @@ const quarterOf = d => d.slice(0,4)+'-Q'+(Math.floor((parseInt(d.slice(5,7),10)-
 function renderVAT(){
   const quarters=[...new Set(transactions.filter(t=>/^\d{4}-\d{2}/.test(t.date||'')).map(t=>quarterOf(t.date)))].sort();
   if(!vatQuarter||!quarters.includes(vatQuarter)) vatQuarter=quarters[quarters.length-1]||null;
-  $('vat-quarters').innerHTML=quarters.map(q=>`<button class="month-tab${q===vatQuarter?' active':''}" onclick="vatQuarter='${q}';renderVAT()">${q.replace('-',' ')}</button>`).join('');
+  $('vat-quarters').innerHTML=quarters.map(q=>`<button class="month-tab${q===vatQuarter?' active':''}" onclick="vatQuarter='${q}';renderVAT()">${lockedQuarters[q]?'🔒 ':''}${q.replace('-',' ')}</button>`).join('');
 
   // KOR limit tracker: business revenue this calendar year vs the €20,000 limit.
   const year=new Date().getFullYear().toString();
@@ -712,7 +720,13 @@ function renderVAT(){
   const byRate=(list,test)=>list.filter(t=>test(vatRateOf(t)));
   const line=(box,label,list)=>`<tr><td style="font-family:var(--font-mono);font-size:12px;color:var(--ink3)">${box}</td><td style="font-size:13px">${label}</td><td style="text-align:right;font-family:var(--font-mono);font-size:13px">${fmtEur(sum(list,t=>t.amount-vatOf(t)))}</td><td style="text-align:right;font-family:var(--font-mono);font-size:13px">${fmtEur(sum(list,vatOf))}</td></tr>`;
   const due=sum(sales,vatOf), input=sum(purchases,vatOf), net=due-input;
-  wrap.innerHTML=`
+  const lock=lockedQuarters[vatQuarter];
+  const ended=quarterEnd(vatQuarter)<new Date().toISOString().slice(0,10);
+  const lockBar=lock
+    ?`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;background:var(--green-light);color:var(--green);border-radius:var(--radius);padding:10px 12px;margin-bottom:12px"><span>🔒 Locked on ${lock.lockedAt.slice(0,10)} — transactions in this quarter can't be changed.</span><button class="btn btn-secondary btn-sm" onclick="unlockQuarter('${vatQuarter}')">Unlock</button></div>`
+    :ended?`<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--ink3);margin-bottom:12px"><span>${preview?'Lock this quarter once its books are checked.':'Lock this quarter once its VAT return is filed.'} A backup is made first.</span><button class="btn btn-primary btn-sm" onclick="lockQuarter('${vatQuarter}',${net.toFixed(2)})">🔒 Lock quarter</button></div>`
+    :`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">This quarter runs until ${quarterEnd(vatQuarter)}; it can be locked after that.</div>`;
+  wrap.innerHTML=`${lockBar}
     ${preview?`<div style="font-size:12px;background:#FFFBEB;color:#92400E;border-radius:var(--radius);padding:10px 12px;margin-bottom:12px">Preview only — in KOR for this quarter, so no VAT return is due and VAT on expenses can't be reclaimed. Shows what the return would be without KOR.</div>`:''}
     ${!preview&&liable.length<inQ.length?`<div style="font-size:12px;color:var(--ink3);margin-bottom:12px">Only transactions from ${vatFrom} are included (${inQ.length-liable.length} earlier ones were under KOR).</div>`:''}
     <table style="width:100%"><thead><tr><th style="width:44px">Box</th><th></th><th style="text-align:right">Excl. VAT</th><th style="text-align:right">VAT</th></tr></thead><tbody>
@@ -745,6 +759,14 @@ function renderVatSettings(){
 }
 
 function setKor(inKor){
+  // Leaving KOR starts VAT today; returning to KOR removes vatFrom. Either way, a locked quarter
+  // on or after the affected date would change, so refuse until it's unlocked.
+  const locked=lastLockedDay();
+  const affected=inKor?vatFrom:new Date().toISOString().slice(0,10);
+  if(locked&&affected&&affected<=locked){
+    alert(`Quarters up to ${locked} are locked, and this change would alter their figures. Unlock them on the VAT page first.`);
+    renderVatSettings(); return;
+  }
   if(inKor){
     if(vatFrom&&!confirm('Mark the business as in KOR again? VAT will no longer be counted in the P&L and VAT return.')){renderVatSettings();return;}
     vatFrom=null;
@@ -783,7 +805,7 @@ function setCategoryVat(sel){
   }
   rate=Number(rate);
   if(rate===DEFAULT_VAT_RATE) delete categoryVat[cat]; else categoryVat[cat]=rate;
-  const handSet=transactions.filter(t=>t.category===cat&&t.vatRate!=null&&t.vatRate!==rate);
+  const handSet=transactions.filter(t=>t.category===cat&&t.vatRate!=null&&t.vatRate!==rate&&!isLockedDate(t.date));
   if(handSet.length&&confirm(`${handSet.length} "${cat}" transaction${handSet.length>1?'s have':' has'} a VAT rate set by hand. Change ${handSet.length>1?'them':'it'} to ${rate}% too?`)){
     handSet.forEach(t=>delete t.vatRate);
   }
@@ -792,7 +814,159 @@ function setCategoryVat(sel){
 
 function setVatFrom(val){
   if(!/^\d{4}-\d{2}-\d{2}$/.test(val)) return;
+  const locked=lastLockedDay();
+  if(locked&&(val<=locked||(vatFrom&&vatFrom<=locked))){
+    alert(`Quarters up to ${locked} are locked. The VAT-registered date must be after that, or unlock those quarters on the VAT page first.`);
+    renderVatSettings(); return;
+  }
   vatFrom=val; renderVatStatusLabels(); saveToDrive(); renderPL();
+}
+
+// ─── QUARTER LOCKING ─────────────────────────────────
+// A locked quarter's transactions can't be recategorised, re-rated or added to by imports, so the
+// figures behind a filed VAT return (or closed books) stay fixed. Locking also writes each
+// transaction's current VAT rate onto it, so later changes to category defaults don't shift it.
+const quarterEnd = q => { const y=q.slice(0,4), n=+q.slice(-1); return y+'-'+String(n*3).padStart(2,'0')+'-'+(n===1||n===4?'31':'30'); };
+const isLockedDate = d => !!d && !!lockedQuarters[quarterOf(d)];
+const alertLocked = d => alert(`${quarterOf(d).replace('-',' ')} is locked. Unlock it on the VAT page to make changes.`);
+// Last day of the latest locked quarter, or '' if none.
+const lastLockedDay = () => { const q=Object.keys(lockedQuarters).sort().pop(); return q?quarterEnd(q):''; };
+
+async function lockQuarter(q,vatNet){
+  if(!confirm(`Lock ${q.replace('-',' ')}?\n\nIts transactions can no longer be changed, and imports will skip new transactions dated in it. You can unlock it later if a correction is needed.`)) return;
+  if(!await backupNow('before-lock-'+q) && !confirm('The backup failed. Lock anyway?')) return;
+  transactions.forEach(t=>{ if(t.date&&quarterOf(t.date)===q&&!isPrivate(t)&&t.vatRate==null) t.vatRate=vatRateOf(t); });
+  lockedQuarters[q]={lockedAt:new Date().toISOString(),vatNet};
+  await saveToDrive();
+  renderVAT(); renderTransactions();
+}
+
+async function unlockQuarter(q){
+  if(!confirm(`Unlock ${q.replace('-',' ')}?\n\nOnly do this to correct a mistake. If its VAT return was already filed, a change may need a correction (suppletie) with the Belastingdienst.`)) return;
+  delete lockedQuarters[q];
+  await saveToDrive();
+  renderVAT(); renderTransactions();
+}
+
+// ─── BACKUPS ─────────────────────────────────────────
+// Copies of kitchen-data.json in a "backups" folder next to it, made with Drive's server-side
+// copy. One automatic backup per day on sign-in; automatic ones older than BACKUP_KEEP_DAYS go to
+// the Drive trash, except the first of each month. Labelled ones (manual, before-lock, …) are kept.
+const BACKUP_FOLDER='backups', BACKUP_KEEP_DAYS=30, BACKUP_PREFIX='kitchen-data_';
+let backupFolderId=null;
+
+async function driveJSON(url,opts={}){
+  const headers={Authorization:'Bearer '+accessToken};
+  if(opts.body) headers['Content-Type']='application/json';
+  const res=await fetch(url,{...opts,headers});
+  if(!res.ok) throw new Error('Drive '+res.status);
+  return res.json();
+}
+
+async function getBackupFolder(){
+  if(backupFolderId) return backupFolderId;
+  const parent=folderId?` and '${folderId}' in parents`:'';
+  const q=encodeURIComponent(`name='${BACKUP_FOLDER}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parent}`);
+  const res=await driveJSON(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`);
+  if(res.files?.length) return backupFolderId=res.files[0].id;
+  const meta={name:BACKUP_FOLDER,mimeType:'application/vnd.google-apps.folder'}; if(folderId) meta.parents=[folderId];
+  return backupFolderId=(await driveJSON('https://www.googleapis.com/drive/v3/files',{method:'POST',body:JSON.stringify(meta)})).id;
+}
+
+async function listBackups(){
+  const q=encodeURIComponent(`'${await getBackupFolder()}' in parents and trashed=false`);
+  return (await driveJSON(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)&orderBy=name desc&pageSize=1000`)).files||[];
+}
+
+// Copies kitchen-data.json into the backups folder. With a label (manual, before-lock, …) the
+// current data is saved first so the backup matches what's on screen. Returns true on success.
+async function backupNow(label){
+  if(!accessToken) return false;
+  try{
+    if(label) await saveToDrive();
+    if(!dataFileId) return false;
+    const stamp=new Date().toISOString().slice(0,19).replace(/:/g,'-');
+    const name=`${BACKUP_PREFIX}${stamp}${label?'_'+label:''}.json`;
+    await driveJSON(`https://www.googleapis.com/drive/v3/files/${dataFileId}/copy?fields=id`,{method:'POST',body:JSON.stringify({name,parents:[await getBackupFolder()]})});
+    return true;
+  }catch(e){ console.error('Backup failed',e); return false; }
+}
+
+async function runDailyBackup(){
+  if(!accessToken||!dataFileId) return;
+  try{
+    const today=new Date().toISOString().slice(0,10);
+    const files=await listBackups();
+    if(!files.some(f=>f.name.startsWith(BACKUP_PREFIX+today))) await backupNow();
+    const isAuto=f=>/^kitchen-data_\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.json$/.test(f.name);
+    const keep=new Set(), seenMonth=new Set();
+    files.filter(isAuto).sort((a,b)=>a.name.localeCompare(b.name)).forEach(f=>{
+      const month=f.name.slice(BACKUP_PREFIX.length,BACKUP_PREFIX.length+7);
+      if(!seenMonth.has(month)){ seenMonth.add(month); keep.add(f.id); }
+    });
+    const cutoff=new Date(Date.now()-BACKUP_KEEP_DAYS*864e5).toISOString().slice(0,10);
+    for(const f of files.filter(isAuto)){
+      if(f.name.slice(BACKUP_PREFIX.length,BACKUP_PREFIX.length+10)<cutoff&&!keep.has(f.id))
+        await driveJSON(`https://www.googleapis.com/drive/v3/files/${f.id}?fields=id`,{method:'PATCH',body:JSON.stringify({trashed:true})});
+    }
+  }catch(e){ console.error('Daily backup failed',e); }
+}
+
+// "kitchen-data_2026-10-05T08-16-05_before-lock-2026-Q2.json" → local date/time + "before lock 2026 Q2".
+function backupLabel(name){
+  const m=name.match(/^kitchen-data_(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})(?:_(.+))?\.json$/);
+  if(!m) return `<div style="font-size:12px;font-family:var(--font-mono)">${esc(name)}</div>`;
+  const when=new Date(`${m[1]}T${m[2]}:${m[3]}:${m[4]}Z`).toLocaleString('en-GB',{day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});
+  const label=m[5]?m[5].replace(/^before-lock-(\d{4})-(Q\d)$/,'before locking $1 $2').replace(/-/g,' '):'daily';
+  return `<div style="font-size:13px">${when}</div><div style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">${esc(label)}</div>`;
+}
+
+async function renderBackups(){
+  const wrap=$('settings-backups'); if(!wrap) return;
+  if(!accessToken){ wrap.innerHTML='<p style="font-size:13px;color:var(--ink3)">Sign in to see backups.</p>'; return; }
+  wrap.innerHTML='<p style="font-size:13px;color:var(--ink3)">Loading backups…</p>';
+  try{
+    const files=(await listBackups()).slice(0,15);
+    wrap.innerHTML=files.length?files.map(f=>`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+      <div style="flex:1;min-width:0">${backupLabel(f.name)}</div>
+      <button class="btn btn-secondary btn-sm" onclick="downloadBackup('${f.id}','${esc(f.name)}')">Download</button>
+      <button class="btn btn-secondary btn-sm" onclick="restoreBackup('${f.id}','${esc(f.name)}')">Restore</button>
+    </div>`).join(''):'<p style="font-size:13px;color:var(--ink3)">No backups yet.</p>';
+  }catch(e){ wrap.innerHTML='<p style="font-size:13px;color:var(--red)">Could not load backups.</p>'; }
+}
+
+async function backupNowFromSettings(btn){
+  btn.disabled=true;
+  const ok=await backupNow('manual');
+  btn.disabled=false;
+  alert(ok?'Backup saved to the "backups" folder in Drive.':'Backup failed — check your connection.');
+  renderBackups();
+}
+
+async function fetchBackup(id){
+  const res=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}});
+  if(!res.ok) throw new Error('Drive '+res.status);
+  return res.json();
+}
+
+async function downloadBackup(id,name){
+  try{
+    const blob=new Blob([JSON.stringify(await fetchBackup(id),null,2)],{type:'application/json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; a.click(); URL.revokeObjectURL(a.href);
+  }catch(e){ alert('Could not download this backup.'); }
+}
+
+async function restoreBackup(id,name){
+  let data;
+  try{ data=await fetchBackup(id); }catch(e){ alert('Could not read this backup.'); return; }
+  if(!Array.isArray(data.transactions)){ alert('This file is not a valid backup.'); return; }
+  if(!confirm(`Restore "${name}"?\n\nIt has ${data.transactions.length} transactions and ${(data.receipts||[]).length} receipts (you now have ${transactions.length} and ${receipts.length}).\n\nYour current data is backed up first, so this can be undone.`)) return;
+  if(!await backupNow('before-restore')){ alert('Could not back up the current data, so nothing was restored.'); return; }
+  transactions=data.transactions; receipts=data.receipts||[]; pendingTasks=data.pendingTasks||[];
+  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{};
+  await saveToDrive();
+  refreshAll(); renderBackups();
+  alert('Backup restored.');
 }
 
 // ─── RECEIPTS ────────────────────────────────────────
@@ -1182,6 +1356,7 @@ function loadSavedFolder(){
 }
 function renderSettings(){
   renderVatSettings();
+  renderBackups();
   const nameEl=$('settings-folder-name');
   const idEl=$('settings-folder-id');
   const badge=$('settings-folder-badge');
@@ -1272,6 +1447,7 @@ function startAutoSync() {
           lastMatchJobRun = data.lastMatchJobRun || lastMatchJobRun;
           vatFrom = data.vatFrom || null;
           categoryVat = data.categoryVat || {};
+          lockedQuarters = data.lockedQuarters || {};
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);
