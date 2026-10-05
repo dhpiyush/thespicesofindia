@@ -352,3 +352,16 @@ select.filter-input{cursor:pointer}
   .receipts-table-desktop{display:block}
   .receipts-cards-mobile{display:none}
 }
+
+/* Columns that drop out on phones (year-end asset table) */
+.show-sm{display:none}
+@media (max-width:600px){ .hide-sm{display:none} .show-sm{display:inline} }
+
+/* Print: only the open page, without navigation or buttons (used for the year-end PDF) */
+@media print{
+  .sidebar,.bottom-nav,#mobile-sync-bar,.no-print{display:none!important}
+  .shell{display:block!important}
+  .page{padding:0}
+  .card{break-inside:avoid;box-shadow:none}
+  body{background:#fff}
+}
