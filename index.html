@@ -66,6 +66,7 @@
       <button class="nav-item" onclick="showPage('vat',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
         VAT
+        <span id="nav-vat-badge" title="Ended quarters not locked yet" style="display:none;margin-left:auto;font-size:10px;background:#D97706;color:#fff;padding:1px 7px;border-radius:20px;font-family:var(--font-mono)"></span>
       </button>
       <div class="nav-label">General</div>
       <button class="nav-item" onclick="showPage('settings',this)">
@@ -324,6 +325,7 @@
         <h2>VAT</h2>
         <p>Quarterly VAT return figures and KOR limit</p>
       </div>
+      <div id="vat-lock-reminder"></div>
       <div class="card"><div class="card-label">KOR limit</div><div id="vat-kor"></div></div>
       <div class="month-tabs" id="vat-quarters"></div>
       <div class="card"><div class="card-label">VAT return</div><div id="vat-return" style="overflow-x:auto"></div></div>
@@ -475,6 +477,7 @@
       <span class="bnav-label">Pending</span>
     </button>
     <button class="bnav-item" id="bnav-pl" onclick="showPage('pl',this);setMobileNav('pl')">
+      <span class="bnav-badge-dot" id="bnav-vat-dot" style="display:none" title="Ended quarters not locked yet"></span>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       <span class="bnav-label">P&amp;L</span>
     </button>

@@ -708,6 +708,12 @@ function renderVAT(){
       <div style="height:8px;background:var(--paper2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${korColor}"></div></div>
       <p style="font-size:12px;color:${pct>=80?korColor:'var(--ink3)'};margin-top:8px">${pct>=100?'Over the KOR limit — VAT applies from the sale that crossed it. Contact your accountant and set the date in Settings.':pct>=80?`${Math.round(pct)}% of the KOR limit used — ${fmtEur(KOR_LIMIT-revenue,true)} left this year.`:`${fmtEur(KOR_LIMIT-revenue,true)} left before the KOR limit.`}</p>`;
 
+  const open=unlockedEndedQuarters();
+  $('vat-lock-reminder').innerHTML=open.length?`<div style="font-size:13px;background:#FFFBEB;color:#92400E;border-radius:var(--radius);padding:10px 12px;margin-bottom:16px;line-height:1.6">
+      ⏰ ${open.length===1?'This quarter has':'These quarters have'} ended but ${open.length===1?"isn't":"aren't"} locked yet: ${open.map(q=>`<a href="#" style="color:inherit;font-weight:600" onclick="vatQuarter='${q}';renderVAT();return false">${q.replace('-',' ')}</a>`).join(', ')}.
+      Lock ${open.length===1?'it':'each one'} once ${vatFrom?'its VAT return is filed':'its books are checked'}.</div>`:'';
+  renderLockReminder();
+
   const wrap=$('vat-return');
   if(!vatQuarter){wrap.innerHTML='<div class="empty"><p>No transactions yet</p></div>';return;}
   const inQ=transactions.filter(t=>t.date&&quarterOf(t.date)===vatQuarter&&!isPrivate(t));
@@ -829,6 +835,21 @@ function setVatFrom(val){
 const quarterEnd = q => { const y=q.slice(0,4), n=+q.slice(-1); return y+'-'+String(n*3).padStart(2,'0')+'-'+(n===1||n===4?'31':'30'); };
 const isLockedDate = d => !!d && !!lockedQuarters[quarterOf(d)];
 const alertLocked = d => alert(`${quarterOf(d).replace('-',' ')} is locked. Unlock it on the VAT page to make changes.`);
+// Ended quarters with transactions that haven't been locked yet, oldest first.
+function unlockedEndedQuarters(){
+  const today=new Date().toISOString().slice(0,10);
+  return [...new Set(transactions.filter(t=>/^\d{4}-\d{2}/.test(t.date||'')).map(t=>quarterOf(t.date)))]
+    .filter(q=>quarterEnd(q)<today&&!lockedQuarters[q]).sort();
+}
+
+// Reminder badge on the VAT nav item.
+function renderLockReminder(){
+  const badge=$('nav-vat-badge'); if(!badge) return;
+  const n=unlockedEndedQuarters().length;
+  badge.style.display=n?'inline-block':'none'; badge.textContent=n;
+  const dot=$('bnav-vat-dot'); if(dot) dot.style.display=n?'block':'none';
+}
+
 // Last day of the latest locked quarter, or '' if none.
 const lastLockedDay = () => { const q=Object.keys(lockedQuarters).sort().pop(); return q?quarterEnd(q):''; };
 
@@ -1413,7 +1434,7 @@ function fmtMonth(m){
 }
 function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();renderVatSettings();}
+function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();renderVatSettings();renderLockReminder();}
 
 // ─── AUTO SYNC ───────────────────────────────────────
 let autoSyncInterval = null;
