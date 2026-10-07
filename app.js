@@ -65,6 +65,7 @@ let monthFolderCache = {};
 let linkingReceiptId = null, selectedTxnId = null;
 let linkingForTxn = false, _selectedReceiptForLink = null;
 let plMonth = 'all';
+let reportYear = null; // year shown on the Dashboard, P&L and Transactions pages
 let isSaving = false;
 
 const $ = id => document.getElementById(id);
@@ -564,19 +565,23 @@ function importMoneybird(input) {
 function renderTransactions() {
   const search=($('search-txn')?.value||'').toLowerCase();
   const typeF=$('filter-type')?.value||'';
-  const monthF=$('filter-month')?.value||'';
   const catF=$('filter-cat')?.value||'';
   const receiptF=$('filter-receipt')?.value||'';
   const receiptIds=new Set(receipts.map(r=>r.id));
-  const months=[...new Set(transactions
-    .map(t=>t.date ? t.date.slice(0,7) : null)
-    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
+  const year=currentReportYear();
+  $('txn-years').innerHTML=reportYearTabsHTML();
+  const yearTxns=transactions.filter(t=>(t.date||'').startsWith(year));
+  const months=[...new Set(yearTxns
+    .map(t=>t.date.slice(0,7))
+    .filter(m=>/^\d{4}-\d{2}$/.test(m))
   )].sort().reverse();
   const mSel=$('filter-month');
   if(mSel){const cur=mSel.value;mSel.innerHTML='<option value="">All months</option>'+months.map(m=>`<option value="${m}"${m===cur?' selected':''}>${fmtMonth(m)}</option>`).join('');}
+  // Read after rebuilding, so a month from another year falls back to "All months"
+  const monthF=mSel?.value||'';
   const catSel=$('filter-cat');
   if(catSel){const curCat=catSel.value;const cats=[...new Set(transactions.map(t=>t.category))].sort();catSel.innerHTML='<option value="">All categories</option>'+cats.map(c=>`<option value="${c}"${c===curCat?' selected':''}>${c}</option>`).join('');}
-  let filtered=transactions.filter(t=>{
+  let filtered=yearTxns.filter(t=>{
     if(typeF&&t.type!==typeF)return false;
     if(monthF&&!t.date.startsWith(monthF))return false;
     if(catF&&t.category!==catF)return false;
@@ -587,8 +592,8 @@ function renderTransactions() {
   const wrap=$('txn-table-wrap');
   const total=(type)=>filtered.filter(t=>t.type===type).reduce((s,t)=>s+t.amount,0);
   const filtering=search||typeF||monthF||catF||receiptF;
-  $('txn-count').textContent=transactions.length
-    ?`${filtering?`${filtered.length} of ${transactions.length}`:transactions.length} transaction${transactions.length===1?'':'s'} · +€ ${fmtEur(total('in'))} · −€ ${fmtEur(total('out'))}`
+  $('txn-count').textContent=yearTxns.length
+    ?`${filtering?`${filtered.length} of ${yearTxns.length}`:yearTxns.length} transaction${yearTxns.length===1?'':'s'} in ${year} · +€ ${fmtEur(total('in'))} · −€ ${fmtEur(total('out'))}`
     :'';
   if(!filtered.length){wrap.innerHTML=`<div class="empty"><div class="empty-icon">${transactions.length?'🔍':'📂'}</div><h3>${transactions.length?'No results':'No transactions'}</h3><p>${transactions.length?'Adjust the filters':'Import your ING CSV to get started'}</p></div>`;return;}
   wrap.innerHTML=`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th><th>VAT</th><th>Type</th><th>Receipt</th></tr></thead><tbody>${filtered.map(t=>{
@@ -613,6 +618,17 @@ const vatOf = t => { const r = vatRateOf(t); return t.amount * r / (100 + r); };
 const isVatLiable = t => !!vatFrom && t.date >= vatFrom;
 // Amount used in the P&L: excl. VAT once VAT-liable, otherwise the full amount paid/received.
 const plAmount = t => isVatLiable(t) ? t.amount - vatOf(t) : t.amount;
+
+// P&L figures for `list` over `months` (sorted YYYY-MM): private/savings/VAT transfers and asset
+// purchases left out (assets are depreciated instead), amounts excl. VAT once VAT-registered, and
+// depreciation from the first to the last month added to the costs. Used by the P&L and Dashboard.
+function plTotals(list, months){
+  const biz=list.filter(t=>!isOutsidePL(t)&&!assetOfTxn(t));
+  const dep=months.length?depreciationBetween(monthIndex(months[0]+'-01'),monthIndex(months[months.length-1]+'-01')):0;
+  const income=biz.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
+  const expense=biz.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0)+dep;
+  return {biz,dep,income,expense};
+}
 
 function vatSelect(t){
   if(isOutsidePL(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
@@ -677,53 +693,68 @@ function savingsSummaryHTML(list, endDate){
     +(bal!=null?row(`Savings balance on ${endDate}`,'€ '+fmtEur(bal),true)
       :`<p style="font-size:12px;color:var(--ink3);margin-top:6px">Set the savings account balance in Settings to see the running balance.</p>`);
 }
+// Years with transactions, oldest first.
+const txnYears = () => [...new Set(transactions.map(t=>(t.date||'').slice(0,4)).filter(y=>/^\d{4}$/.test(y)))].sort();
+// The selected year, defaulting to the latest year with transactions.
+function currentReportYear(){
+  const years=txnYears();
+  if(!reportYear||!years.includes(reportYear)) reportYear=years[years.length-1]||String(new Date().getFullYear());
+  return reportYear;
+}
+// Year buttons shared by the Dashboard, P&L and Transactions pages.
+const reportYearTabsHTML = () => txnYears().map(y=>`<button class="month-tab${y===reportYear?' active':''}" onclick="setReportYear('${y}')">${y}</button>`).join('');
+function setReportYear(y){ reportYear=y; plMonth='all'; renderDashboard(); renderPL(); renderTransactions(); }
+
 function renderDashboard() {
-  // Exclude private deposits/withdrawals from all P&L figures
-  const income =transactions.filter(t=>t.type==='in' &&!isOutsidePL(t)).reduce((s,t)=>s+t.amount,0);
-  const expense=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)).reduce((s,t)=>s+t.amount,0);
+  const year=currentReportYear();
+  $('dash-years').innerHTML=reportYearTabsHTML();
+  $('dash-subtitle').textContent=year+' — all months';
+  const yearTxns=transactions.filter(t=>(t.date||'').startsWith(year));
+  const yearReceipts=receipts.filter(r=>(r.date||'').startsWith(year));
+  const months=[...new Set(yearTxns
+    .map(t=>t.date.slice(0,7))
+    .filter(m=>/^\d{4}-\d{2}$/.test(m))
+  )].sort();
+  // Same figures as the P&L page's full year
+  const {biz,income,expense}=plTotals(yearTxns,months);
   const profit=income-expense;
-  const linked=receipts.filter(r=>transactions.some(t=>t.receiptId===r.id)).length;
+  const linked=yearReceipts.filter(r=>transactions.some(t=>t.receiptId===r.id)).length;
   $('stat-income').textContent=fmtEur(income,true);
-  $('stat-income-sub').textContent=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)).length+' transactions';
+  $('stat-income-sub').textContent=biz.filter(t=>t.type==='in').length+' transactions';
   $('stat-expense').textContent=fmtEur(expense,true);
-  $('stat-expense-sub').textContent=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)).length+' transactions';
+  $('stat-expense-sub').textContent=biz.filter(t=>t.type==='out').length+' transactions';
   $('stat-profit').textContent=fmtEur(profit,true);
-  $('stat-receipts').textContent=receipts.length;
+  $('stat-receipts').textContent=yearReceipts.length;
   $('stat-receipts-linked').textContent=linked+' linked';
   // Mobile stats
-  if($('m-stat-income')){$('m-stat-income').textContent=fmtEur(income,true);$('m-stat-expense').textContent=fmtEur(expense,true);$('m-stat-profit').textContent=fmtEur(profit,true);$('m-stat-receipts').textContent=receipts.length;}
-  const months=[...new Set(transactions
-    .map(t=>t.date ? t.date.slice(0,7) : null)
-    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
-  )].sort();
+  if($('m-stat-income')){$('m-stat-income').textContent=fmtEur(income,true);$('m-stat-expense').textContent=fmtEur(expense,true);$('m-stat-profit').textContent=fmtEur(profit,true);$('m-stat-receipts').textContent=yearReceipts.length;}
   const chart=$('bar-chart');
   if(!months.length){chart.innerHTML='<div class="empty" style="padding:1rem;flex:1"><p>No data yet</p></div>';return;}
-  const maxVal=Math.max(...months.map(m=>{const i=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);const e=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);return Math.max(i,e);}),1);
-  chart.innerHTML=months.map(m=>{
-    const inc=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
-    const exp=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+  const perMonth=months.map(m=>plTotals(yearTxns.filter(t=>t.date.startsWith(m)),[m]));
+  const maxVal=Math.max(...perMonth.map(p=>Math.max(p.income,p.expense)),1);
+  chart.innerHTML=months.map((m,i)=>{
+    const inc=perMonth[i].income, exp=perMonth[i].expense;
     const ih=Math.max(Math.round((inc/maxVal)*110),2);const eh=Math.max(Math.round((exp/maxVal)*110),2);
     return`<div class="bar-group"><div class="bar-wrap"><div class="bar income-bar" style="height:${ih}px" title="Revenue ${fmtEur(inc,true)}"></div><div class="bar expense-bar" style="height:${eh}px" title="Expenses ${fmtEur(exp,true)}"></div></div><div class="bar-label">${m.slice(5)}</div></div>`;
   }).join('');
-  const recent=[...transactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  const recent=[...yearTxns].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   $('recent-txn-list').innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${recent.map(t=>`<tr><td style="font-family:var(--font-mono);font-size:12px">${t.date}</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><span class="badge ${isOutsidePL(t)?'badge-private':'badge-cat'}">${esc(t.category)}</span></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:1.5rem"><p>Import your bank statement to get started</p></div>';
 }
 
 // ─── P&L ─────────────────────────────────────────────
 function renderPL() {
-  // Group by YYYY-MM, filter out any bad dates, sort chronologically
-  const months=['all',...[...new Set(transactions
-    .map(t=>t.date ? t.date.slice(0,7) : null)
-    .filter(m=>m && /^\d{4}-\d{2}$/.test(m))
+  const year=currentReportYear();
+  $('pl-years').innerHTML=reportYearTabsHTML();
+  const yearTxns=transactions.filter(t=>(t.date||'').startsWith(year));
+  // Group the year's transactions by YYYY-MM, filter out any bad dates, sort chronologically
+  const months=['all',...[...new Set(yearTxns
+    .map(t=>t.date.slice(0,7))
+    .filter(m=>/^\d{4}-\d{2}$/.test(m))
   )].sort()];
+  if(!months.includes(plMonth)) plMonth='all';
   $('pl-months').innerHTML=months.map(m=>`<button class="month-tab${m===plMonth?' active':''}" onclick="setPLMonth('${m}',this)">${m==='all'?'Full year':fmtMonth(m)}</button>`).join('');
-  const all=plMonth==='all'?transactions:transactions.filter(t=>t.date && t.date.startsWith(plMonth));
-  // Exclude private categories and asset purchases (those are depreciated instead) from P&L
-  const filtered=all.filter(t=>!isOutsidePL(t)&&!assetOfTxn(t));
-  const plMonths=plMonth==='all'?months.slice(1):[plMonth];
-  const dep=plMonths.length?depreciationBetween(monthIndex(plMonths[0]+'-01'),monthIndex(plMonths[plMonths.length-1]+'-01')):0;
-  const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
-  const expense=filtered.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0)+dep;
+  const all=plMonth==='all'?yearTxns:yearTxns.filter(t=>t.date.startsWith(plMonth));
+  const {biz:filtered,dep,income,expense}=plTotals(all,plMonth==='all'?months.slice(1):[plMonth]);
   const liable=filtered.filter(isVatLiable).length;
   $('pl-subtitle').textContent=!liable?'By category — KOR-exempt, amounts incl. VAT':liable===filtered.length?'By category — amounts excl. VAT':`By category — excl. VAT from ${vatFrom}, incl. VAT before (KOR)`;
   $('pl-income').textContent=fmtEur(income,true);$('pl-expense').textContent=fmtEur(expense,true);$('pl-profit').textContent=fmtEur(income-expense,true);
@@ -750,16 +781,17 @@ function renderPL() {
   }
 }
 
-function setPLMonth(m,btn){plMonth=m;document.querySelectorAll('.month-tab').forEach(b=>b.classList.remove('active'));btn.classList.add('active');renderPL();}
+function setPLMonth(m){plMonth=m;renderPL();}
 
 function exportCSV(){
-  const filtered=plMonth==='all'?transactions:transactions.filter(t=>t.date.startsWith(plMonth));
+  const period=plMonth==='all'?currentReportYear():plMonth;
+  const filtered=transactions.filter(t=>(t.date||'').startsWith(period));
   const rows=[['Date','Description','Category','Type','Amount','VAT rate %','VAT','Amount excl. VAT']];
   filtered.sort((a,b)=>a.date.localeCompare(b.date)).forEach(t=>{const sign=t.type==='out'?'-':'';rows.push([t.date,t.desc,t.category,t.type==='in'?'Revenue':'Expense',sign+t.amount.toFixed(2),vatRateOf(t),sign+vatOf(t).toFixed(2),sign+(t.amount-vatOf(t)).toFixed(2)]);});
   const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download=`kitchen-books${plMonth!=='all'?'_'+plMonth:''}.csv`;a.click();
+  const a=document.createElement('a');a.href=url;a.download=`kitchen-books_${period}.csv`;a.click();
   URL.revokeObjectURL(url);
 }
 
