@@ -116,8 +116,9 @@
     <div class="page active" id="page-dashboard">
       <div class="page-header">
         <h2>Dashboard</h2>
-        <p>Current year — all months</p>
+        <p id="dash-subtitle">Current year — all months</p>
       </div>
+      <div class="month-tabs" id="dash-years"></div>
       <!-- Mobile horizontal stats -->
       <div class="mobile-stats">
         <div class="mobile-stat"><div class="mobile-stat-label">Revenue</div><div class="mobile-stat-val income" id="m-stat-income" style="color:var(--green)">€0</div></div>
@@ -224,6 +225,7 @@
           </div>
         </div>
       </div>
+      <div class="month-tabs" id="txn-years"></div>
       <div class="filters">
         <input class="filter-input" type="text" id="search-txn" placeholder="Search…" oninput="renderTransactions()" style="flex:1;min-width:140px"/>
         <select class="filter-input" id="filter-type" onchange="renderTransactions()">
@@ -327,6 +329,7 @@
           </button>
         </div>
       </div>
+      <div class="month-tabs" id="pl-years"></div>
       <div class="month-tabs" id="pl-months"></div>
       <div class="stats" style="grid-template-columns:repeat(3,1fr)">
         <div class="stat income"><div class="stat-label">Revenue</div><div class="stat-val" id="pl-income">€ 0</div></div>
