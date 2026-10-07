@@ -6,15 +6,22 @@ const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com
 const DATA_FILENAME = 'kitchen-data.json';
 // ────────────────────────────────────────────────────
 
-const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue','Other revenue','Private deposit','Savings transfer'];
-const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal','Savings transfer'];
+const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue','Other revenue','Private deposit','Savings transfer','VAT payment'];
+const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal','Savings transfer','VAT payment'];
 const PRIVATE_CATEGORIES = ['Private deposit','Private withdrawal'];
 // Money moved between the business current account and the business savings account: not
 // revenue or a cost, and not private either.
 const SAVINGS_CATEGORY = 'Savings transfer';
-const OUTSIDE_PL_CATEGORIES = [...PRIVATE_CATEGORIES, SAVINGS_CATEGORY];
-// Imports put transactions whose description mentions the savings account straight in SAVINGS_CATEGORY.
+// VAT paid to (or refunded by) the Belastingdienst settles the VAT owed on the balance sheet:
+// not a cost, and not private either.
+const VAT_PAYMENT_CATEGORY = 'VAT payment';
+const OUTSIDE_PL_CATEGORIES = [...PRIVATE_CATEGORIES, SAVINGS_CATEGORY, VAT_PAYMENT_CATEGORY];
+// Imports put transactions whose description mentions the savings account straight in SAVINGS_CATEGORY,
+// and Belastingdienst payments for a VAT return ("Btw-aangifte") in VAT_PAYMENT_CATEGORY.
 const SAVINGS_PATTERN = /spaarrekening/i;
+const VAT_PAYMENT_PATTERN = /belastingdienst[\s\S]*\bbtw\b|\bbtw\b[\s\S]*belastingdienst/i;
+const importCategory = (text, isIn) =>
+  SAVINGS_PATTERN.test(text) ? SAVINGS_CATEGORY : VAT_PAYMENT_PATTERN.test(text) ? VAT_PAYMENT_CATEGORY : isIn ? CATEGORIES_IN[0] : CATEGORIES_OUT[0];
 
 // Shared duplicate check for CSV/XLSX imports: same date + amount + direction, with a fuzzy
 // (substring) desc match, since different export formats describe the same mutation differently.
@@ -416,7 +423,7 @@ function importING(input) {
           const descClean = desc.trim();
           const bankDetails = (detailsKey ? row[detailsKey] || '' : '').trim();
 
-          const id='txn_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+          const id='txn_'+Date.now()+'_'+Math.random().toString(36).slice(2,10);
           // Duplicate check: same date + amount + direction, with a fuzzy desc match
           // (description text varies between export formats, e.g. "G. Bijsterbosch" vs "Betaling van G. Bijsterbosch NL13...")
           const duplicate = findINGDuplicate(existing, matched, dateStr, amt, isIn ? 'in' : 'out', descClean, bankDetails);
@@ -425,7 +432,7 @@ function importING(input) {
           transactions.push({
             id, date:dateStr, desc:descClean, bankDetails, amount:amt,
             type:isIn?'in':'out',
-            category:SAVINGS_PATTERN.test(descClean+' '+bankDetails)?SAVINGS_CATEGORY:isIn?CATEGORIES_IN[0]:CATEGORIES_OUT[0],
+            category:importCategory(descClean+' '+bankDetails,isIn),
             receiptId:null
           });
           added++;
@@ -517,7 +524,7 @@ function importMoneybird(input) {
           unmapped.add(linkedTo);
         } else {
           // No category (linked to a receipt filename/screenshot) — use default
-          category = SAVINGS_PATTERN.test(desc) ? SAVINGS_CATEGORY : isIn ? CATEGORIES_IN[0] : CATEGORIES_OUT[0];
+          category = importCategory(desc, isIn);
         }
 
         // Override with private categories based on mapping
@@ -532,7 +539,7 @@ function importMoneybird(input) {
         }
         if (isLockedDate(dateStr)) { lockedSkipped++; continue; }
 
-        const id = 'txn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+        const id = 'txn_' + Date.now() + '_' + Math.random().toString(36).slice(2, 10);
         transactions.push({ id, date: dateStr, desc, amount: absAmt, type: isIn ? 'in' : 'out', category, receiptId: null });
         added++;
       }
@@ -635,6 +642,7 @@ function updateVat(id,sel){
 // ─── DASHBOARD ───────────────────────────────────────
 const isPrivate = t => PRIVATE_CATEGORIES.includes(t.category);
 const isSavings = t => t.category === SAVINGS_CATEGORY;
+const isVatPayment = t => t.category === VAT_PAYMENT_CATEGORY;
 // Private transfers and savings transfers: left out of revenue, costs, profit and VAT.
 const isOutsidePL = t => OUTSIDE_PL_CATEGORIES.includes(t.category);
 
@@ -735,7 +743,10 @@ function renderPL() {
   const privTotal=privateRows.reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),0);
   const privEl=$('pl-private');
   if(privEl){
-    privEl.innerHTML=privateRows.length?`<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;color:var(--ink2)">Private transfers (${privateRows.length} transactions · not in P&L)</span><span style="font-family:var(--font-mono);font-size:13px;color:var(--ink3)">${privTotal>=0?'+':''}${fmtEur(Math.abs(privTotal),true)}</span></div>`:'<p style="font-size:13px;color:var(--ink3)">No private transfers</p>';
+    const vatRows=all.filter(isVatPayment);
+    const vatTotal=vatRows.reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),0);
+    privEl.innerHTML=(privateRows.length?`<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:13px;color:var(--ink2)">Private transfers (${privateRows.length} transactions · not in P&L)</span><span style="font-family:var(--font-mono);font-size:13px;color:var(--ink3)">${privTotal>=0?'+':''}${fmtEur(Math.abs(privTotal),true)}</span></div>`:'<p style="font-size:13px;color:var(--ink3)">No private transfers</p>')
+      +(vatRows.length?`<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-size:13px;color:var(--ink2)">VAT payments (${vatRows.length} transaction${vatRows.length===1?'':'s'} · not in P&L)</span><span style="font-family:var(--font-mono);font-size:13px;color:var(--ink3)">${vatTotal>=0?'+':'−'}${fmtEur(Math.abs(vatTotal),true)}</span></div>`:'');
   }
 }
 
@@ -1205,9 +1216,13 @@ function bankBalanceAt(date){
     .reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),bankOpening.amount);
 }
 
-// Net VAT (sales VAT minus input VAT) on transactions up to and including `date`.
-const vatOwedAt = date => transactions.filter(t=>t.date<=date&&!isOutsidePL(t)&&isVatLiable(t))
-  .reduce((s,t)=>s+(t.type==='in'?vatOf(t):-vatOf(t)),0);
+// VAT still owed at the end of `date`: net VAT (sales VAT minus input VAT) on transactions up to
+// and including `date`, less VAT paid to the Belastingdienst (plus refunds received).
+const vatOwedAt = date => transactions.filter(t=>t.date<=date).reduce((s,t)=>{
+  if(isVatPayment(t)) return s+(t.type==='in'?t.amount:-t.amount);
+  if(isOutsidePL(t)||!isVatLiable(t)) return s;
+  return s+(t.type==='in'?vatOf(t):-vatOf(t));
+},0);
 
 // Current account balance at the start of `date`, before that day's transactions.
 function bankBalanceBefore(date){
@@ -1284,7 +1299,7 @@ function balanceSheetHTML(y){
         :`<p style="font-size:12px;color:#92400E;background:#FFFBEB;border-radius:var(--radius);padding:8px 10px;margin-top:6px">Difference of ${money(diff)}. Usually an asset whose cost doesn't match how it was paid — e.g. a cost incl. VAT for something bought after VAT registration (use the price excl. VAT).</p>`}
     </div>`:''}
     <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.6">Check the current account (${money(bankBalanceAt(lastTxnDate))} on ${lastTxnDate}, the last imported transaction) against your ING statement for that day. A different amount means transactions are missing or imported twice.</p>
-    ${vatFrom?'<p style="font-size:11px;color:var(--ink3);margin-top:8px">VAT is the net VAT since registration; VAT payments aren\'t tracked separately yet.</p>':''}`;
+    ${vatFrom?'<p style="font-size:11px;color:var(--ink3);margin-top:8px">VAT is the net VAT since registration, less VAT payments (category "VAT payment").</p>':''}`;
 }
 
 // ─── YEAR-END SUMMARY ────────────────────────────────
