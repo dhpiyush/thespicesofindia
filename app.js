@@ -51,6 +51,7 @@ let lockedQuarters = {}; // 'YYYY-Qn' → { lockedAt, vatNet } — closed quarte
 let assets = []; // asset register: { id, name, purchaseDate, cost, lifeYears, residual, disposedDate, txnId }
 let savingsOpening = null; // { date, amount } — savings account balance on that date (Settings)
 let hours = []; // hours log: { id, date, start, end, breakMin, hours, description, person }
+let bankOpening = null; // { date, amount } — current account balance at the start of that date (Settings)
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -114,6 +115,7 @@ async function loadFromDrive() {
       assets = data.assets || [];
       savingsOpening = data.savingsOpening || null;
       hours = data.hours || [];
+      bankOpening = data.bankOpening || null;
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -159,7 +161,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, savingsOpening, hours, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, savingsOpening, hours, bankOpening, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -326,7 +328,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; savingsOpening=null; hours=[]; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; savingsOpening=null; hours=[]; bankOpening=null; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -824,6 +826,25 @@ function renderSavingsSettings(){
   $('settings-savings-now').textContent=bal!=null?`Current balance according to the portal: € ${fmtEur(bal)}`:'';
 }
 
+function renderBankSettings(){
+  if(!$('settings-bank-amount')) return;
+  $('settings-bank-date').value=bankOpening?bankOpening.date:(transactions.map(t=>t.date).sort()[0]||new Date().toISOString().slice(0,4)+'-01-01').slice(0,4)+'-01-01';
+  $('settings-bank-amount').value=bankOpening?bankOpening.amount:'';
+  const bal=bankBalanceAt(new Date().toISOString().slice(0,10));
+  $('settings-bank-now').textContent=bal!=null?`Current balance according to the portal: € ${bal<0?'−':''}${fmtEur(bal)}`:'';
+}
+
+function saveBankOpening(){
+  const date=$('settings-bank-date').value, raw=$('settings-bank-amount').value.trim();
+  if(raw===''){ bankOpening=null; }
+  else{
+    const amount=parseAmountInput(raw.replace(/^−/,'-'));
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(amount)){ alert('Please enter a date and a balance.'); return; }
+    bankOpening={date,amount};
+  }
+  saveToDrive(); renderBankSettings();
+}
+
 function saveSavingsOpening(){
   const date=$('settings-savings-date').value, raw=$('settings-savings-amount').value.trim();
   if(raw===''){ savingsOpening=null; }
@@ -1065,7 +1086,7 @@ async function restoreBackup(id,name){
   if(!confirm(`Restore "${name}"?\n\nIt has ${data.transactions.length} transactions and ${(data.receipts||[]).length} receipts (you now have ${transactions.length} and ${receipts.length}).\n\nYour current data is backed up first, so this can be undone.`)) return;
   if(!await backupNow('before-restore')){ alert('Could not back up the current data, so nothing was restored.'); return; }
   transactions=data.transactions; receipts=data.receipts||[]; pendingTasks=data.pendingTasks||[];
-  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[]; savingsOpening=data.savingsOpening||null; hours=data.hours||[];
+  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[]; savingsOpening=data.savingsOpening||null; hours=data.hours||[]; bankOpening=data.bankOpening||null;
   await saveToDrive();
   refreshAll(); renderBackups();
   alert('Backup restored.');
@@ -1168,6 +1189,104 @@ function markTxnAsAsset(txnId){
   $('asset-txn').value=txnId; assetTxnChanged(txnId);
 }
 
+// ─── BALANCE SHEET ───────────────────────────────────
+// Built from what the portal knows: equipment at book value, the current account (opening balance
+// from Settings plus every transaction since), the savings account, and — once VAT-registered —
+// net VAT since registration. Equity is the difference; it's checked against the start equity plus
+// profit and private movements. That check catches inconsistent bookings (e.g. an asset cost that
+// includes VAT that is also reclaimed), not missing transactions — those change the bank balance and
+// profit alike, so the current account has to be compared with the bank statement.
+const dayBefore = d => new Date(new Date(d+'T00:00:00Z').getTime()-864e5).toISOString().slice(0,10);
+
+// Current account balance at the end of `date`; null before the Settings opening date.
+function bankBalanceAt(date){
+  if(!bankOpening||date<bankOpening.date) return null;
+  return transactions.filter(t=>t.date>=bankOpening.date&&t.date<=date)
+    .reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),bankOpening.amount);
+}
+
+// Net VAT (sales VAT minus input VAT) on transactions up to and including `date`.
+const vatOwedAt = date => transactions.filter(t=>t.date<=date&&!isOutsidePL(t)&&isVatLiable(t))
+  .reduce((s,t)=>s+(t.type==='in'?vatOf(t):-vatOf(t)),0);
+
+// Current account balance at the start of `date`, before that day's transactions.
+function bankBalanceBefore(date){
+  if(!bankOpening||date<bankOpening.date) return null;
+  return date===bankOpening.date?bankOpening.amount:bankBalanceAt(dayBefore(date));
+}
+
+// Position at the end of `date`, or at its start with {start:true}. null if a balance is unknown.
+function balanceAt(date,{start=false}={}){
+  const upTo=start?dayBefore(date):date;
+  const bank=start?bankBalanceBefore(date):bankBalanceAt(date);
+  const anySavings=transactions.some(t=>isSavings(t)&&t.date<=upTo);
+  const savings=savingsOpening?(start?savingsBalanceBefore(date):savingsBalanceAt(date)):(anySavings?null:0);
+  date=upTo;
+  if(bank==null||savings==null) return null;
+  const fixed=assets.reduce((s,a)=>s+(bookValue(a,monthIndex(date))||0),0);
+  const vat=vatOwedAt(date);
+  const totalAssets=fixed+bank+savings+(vat<0?-vat:0);
+  const liabilities=vat>0?vat:0;
+  return {fixed,bank,savings,vat,totalAssets,liabilities,equity:totalAssets-liabilities};
+}
+
+// Profit from `from` to `to` (inclusive dates), matching the P&L rules.
+function profitBetween(from,to){
+  const inRange=transactions.filter(t=>t.date>=from&&t.date<=to&&!isOutsidePL(t)&&!assetOfTxn(t));
+  const rev=inRange.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
+  const cost=inRange.filter(t=>t.type==='out').reduce((s,t)=>s+plAmount(t),0);
+  return rev-cost-depreciationBetween(monthIndex(from),monthIndex(to));
+}
+
+function balanceSheetHTML(y){
+  const today=new Date().toISOString().slice(0,10);
+  const start=y+'-01-01', end=(y+'-12-31')<today?y+'-12-31':today;
+  if(!bankOpening) return '<p style="font-size:13px;color:var(--ink3)">Enter your current account balance in Settings → Bank balances to see the balance sheet.</p>';
+  if(end<bankOpening.date) return `<p style="font-size:13px;color:var(--ink3)">The current account balance in Settings starts on ${bankOpening.date}, after this year.</p>`;
+  const from=start<bankOpening.date?bankOpening.date:start;
+  const a=balanceAt(from,{start:true}), b=balanceAt(end);
+  if(!b) return '<p style="font-size:13px;color:var(--ink3)">There are savings transfers but no savings balance yet. Enter it in Settings → Bank balances.</p>';
+  const money=v=>v==null?'—':(v<0?'−':'')+'€ '+fmtEur(v);
+  const r=(label,va,vb,o={})=>`<tr${o.bold?' style="font-weight:600"':''}><td style="font-size:13px;padding:6px 0">${label}</td><td style="text-align:right;font-family:var(--font-mono);font-size:12px">${money(va)}</td><td style="text-align:right;font-family:var(--font-mono);font-size:12px">${money(vb)}</td></tr>`;
+  const g=k=>a?a[k]:null;
+  const head=(t)=>`<tr><td colspan="3" style="font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;padding-top:10px">${t}</td></tr>`;
+  // Equity movement over the period
+  const inP=transactions.filter(t=>t.date>=from&&t.date<=end);
+  const lastTxnDate=transactions.map(t=>t.date).filter(x=>x<=end).sort().pop()||end;
+  const withdrawals=inP.filter(t=>isPrivate(t)&&t.type==='out').reduce((s,t)=>s+t.amount,0);
+  const deposits=inP.filter(t=>isPrivate(t)&&t.type==='in').reduce((s,t)=>s+t.amount,0);
+  const broughtIn=assets.filter(x=>!x.txnId&&x.purchaseDate>=from&&x.purchaseDate<=end).reduce((s,x)=>s+x.cost,0);
+  const profit=profitBetween(from,end);
+  const expected=a?a.equity+profit+deposits-withdrawals+broughtIn:null;
+  const diff=expected!=null?b.equity-expected:null;
+  const line=(label,v,o={})=>`<div style="display:flex;justify-content:space-between;padding:5px 0;font-size:13px${o.bold?';font-weight:600':''}${o.color?';color:'+o.color:''}"><span>${label}</span><span style="font-family:var(--font-mono)">${money(v)}</span></div>`;
+  return `<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th></th><th style="text-align:right">Start ${from}</th><th style="text-align:right">${end}</th></tr></thead><tbody>
+      ${head('Assets')}
+      ${r('Equipment (book value)',g('fixed'),b.fixed)}
+      ${r('Current account',g('bank'),b.bank)}
+      ${r('Savings account',g('savings'),b.savings)}
+      ${b.vat<0||(a&&a.vat<0)?r('VAT to get back',a&&a.vat<0?-a.vat:0,b.vat<0?-b.vat:0):''}
+      ${r('Total assets',g('totalAssets'),b.totalAssets,{bold:true})}
+      ${head('Liabilities')}
+      ${r('VAT to pay',a&&a.vat>0?a.vat:0,b.vat>0?b.vat:0)}
+      ${head('Equity')}
+      ${r('Equity (assets − liabilities)',g('equity'),b.equity,{bold:true})}
+    </tbody></table></div>
+    ${a?`<div style="margin-top:12px;border-top:1px solid var(--border);padding-top:8px">
+      <div style="font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:4px">Equity check</div>
+      ${line('Equity at '+from,a.equity)}
+      ${line('+ Profit',profit)}
+      ${line('+ Private deposits',deposits)}
+      ${line('− Private withdrawals',-withdrawals)}
+      ${broughtIn?line('+ Equipment paid privately',broughtIn):''}
+      ${line('= Expected equity at '+end,expected,{bold:true})}
+      ${Math.abs(diff)<0.01?`<p style="font-size:12px;color:var(--green);margin-top:4px">✓ Matches the balance sheet</p>`
+        :`<p style="font-size:12px;color:#92400E;background:#FFFBEB;border-radius:var(--radius);padding:8px 10px;margin-top:6px">Difference of ${money(diff)}. Usually an asset whose cost doesn't match how it was paid — e.g. a cost incl. VAT for something bought after VAT registration (use the price excl. VAT).</p>`}
+    </div>`:''}
+    <p style="font-size:12px;color:var(--ink2);margin-top:10px;line-height:1.6">Check the current account (${money(bankBalanceAt(lastTxnDate))} on ${lastTxnDate}, the last imported transaction) against your ING statement for that day. A different amount means transactions are missing or imported twice.</p>
+    ${vatFrom?'<p style="font-size:11px;color:var(--ink3);margin-top:8px">VAT is the net VAT since registration; VAT payments aren\'t tracked separately yet.</p>':''}`;
+}
+
 // ─── YEAR-END SUMMARY ────────────────────────────────
 let yearEndYear = null;
 
@@ -1210,6 +1329,7 @@ function renderYearEnd(){
       ${row('Moved back from savings',savingsMoves(inYear).fromSavings)}
       ${row('Balance on 31 Dec',0,{bold:true,raw:savingsBalanceAt(y+'-12-31')!=null?'€ '+fmtEur(savingsBalanceAt(y+'-12-31')):'— (set the balance in Settings)'})}
     </div>
+    <div class="card"><div class="card-label">Balance sheet</div>${balanceSheetHTML(y)}</div>
     <div class="card"><div class="card-label">Checks for your accountant</div>
       ${row('Expenses without a receipt',0,{raw:`${noReceipt.length} · € ${fmtEur(sum(noReceipt,t=>t.amount))}`,color:noReceipt.length?'#D97706':'var(--green)'})}
       ${row('Quarters locked',0,{raw:quarters.map(q=>`${q.slice(5)} ${lockedQuarters[q]?'🔒':'—'}`).join('  ')})}
@@ -1783,6 +1903,7 @@ function loadSavedFolder(){
 function renderSettings(){
   renderVatSettings();
   renderSavingsSettings();
+  renderBankSettings();
   renderBackups();
   const nameEl=$('settings-folder-name');
   const idEl=$('settings-folder-id');
@@ -1878,6 +1999,7 @@ function startAutoSync() {
           assets = data.assets || [];
           savingsOpening = data.savingsOpening || null;
           hours = data.hours || [];
+          bankOpening = data.bankOpening || null;
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);

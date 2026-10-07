@@ -479,9 +479,17 @@
         <div id="settings-backups"></div>
       </div>
 
-      <!-- Savings -->
+      <!-- Bank balances -->
       <div class="card">
-        <div class="card-label">🏦 Savings account</div>
+        <div class="card-label">🏦 Bank balances</div>
+        <p style="font-size:12px;color:var(--ink3);margin-bottom:12px;line-height:1.6">The balance sheet needs a starting balance for the business current account. Use the balance on your ING statement at the start of a date (e.g. 1 January); every transaction from that day on is added.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:12px;color:var(--ink2)">Current account at the start of<input type="date" class="filter-input" id="settings-bank-date" style="display:block;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">Balance (€)<input class="filter-input" id="settings-bank-amount" inputmode="decimal" placeholder="e.g. 3610,56" style="display:block;margin-top:4px;width:140px"/></label>
+          <button class="btn btn-secondary btn-sm" onclick="saveBankOpening()">Save</button>
+        </div>
+        <div id="settings-bank-now" style="font-size:12px;color:var(--ink2);font-family:var(--font-mono);margin-top:10px;margin-bottom:16px"></div>
+        <div style="font-size:13px;font-weight:500;margin-bottom:4px">Savings account</div>
         <p style="font-size:12px;color:var(--ink3);margin-bottom:12px;line-height:1.6">Transfers between your current account and the business savings account (category <strong>Savings transfer</strong>) are left out of the P&amp;L. ING imports mentioning "Spaarrekening" get this category automatically. Enter the savings balance on a date to see the running balance.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <label style="font-size:12px;color:var(--ink2)">Balance at the start of<input type="date" class="filter-input" id="settings-savings-date" style="display:block;margin-top:4px"/></label>
