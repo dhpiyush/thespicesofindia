@@ -50,6 +50,7 @@ let categoryVat = {}; // category → default VAT rate (%); categories not liste
 let lockedQuarters = {}; // 'YYYY-Qn' → { lockedAt, vatNet } — closed quarters can't be edited
 let assets = []; // asset register: { id, name, purchaseDate, cost, lifeYears, residual, disposedDate, txnId }
 let savingsOpening = null; // { date, amount } — savings account balance on that date (Settings)
+let hours = []; // hours log: { id, date, start, end, breakMin, hours, description, person }
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -112,6 +113,7 @@ async function loadFromDrive() {
       lockedQuarters = data.lockedQuarters || {};
       assets = data.assets || [];
       savingsOpening = data.savingsOpening || null;
+      hours = data.hours || [];
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -157,7 +159,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, savingsOpening, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, savingsOpening, hours, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -324,7 +326,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; savingsOpening=null; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; savingsOpening=null; hours=[]; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -354,6 +356,7 @@ function showPage(id, btn) {
   if (id==='pl') renderPL();
   if (id==='vat') renderVAT();
   if (id==='yearend') renderYearEnd();
+  if (id==='hours') renderHours();
   if (id==='quickupload') renderQuickUpload();
   if (id==='settings') renderSettings();
 }
@@ -1062,7 +1065,7 @@ async function restoreBackup(id,name){
   if(!confirm(`Restore "${name}"?\n\nIt has ${data.transactions.length} transactions and ${(data.receipts||[]).length} receipts (you now have ${transactions.length} and ${receipts.length}).\n\nYour current data is backed up first, so this can be undone.`)) return;
   if(!await backupNow('before-restore')){ alert('Could not back up the current data, so nothing was restored.'); return; }
   transactions=data.transactions; receipts=data.receipts||[]; pendingTasks=data.pendingTasks||[];
-  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[]; savingsOpening=data.savingsOpening||null;
+  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[]; savingsOpening=data.savingsOpening||null; hours=data.hours||[];
   await saveToDrive();
   refreshAll(); renderBackups();
   alert('Backup restored.');
@@ -1245,6 +1248,151 @@ function exportYearEndCSV(){
   assets.filter(a=>a.purchaseDate.slice(0,4)<=y).forEach(a=>rows.push(['Assets',`${a.name} (cost ${a.cost.toFixed(2)}, ${a.lifeYears} yrs, depreciation ${assetDepreciation(a,from,to).toFixed(2)})`,a.purchaseDate,(bookValue(a,to)||0).toFixed(2)]));
   const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download=`year-end-${y}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// ─── HOURS LOG ───────────────────────────────────────
+// Working hours per person, as proof for the hours criterion (urencriterium): at least
+// HOURS_TARGET hours a year on the business for the self-employed deduction. Each entry is either
+// start/end time minus a break, or a number of hours entered directly.
+const HOURS_TARGET = 1225;
+let hoursYear = null, editingHoursId = null;
+
+const currentPerson = () => localStorage.getItem('kb_user_name') || '';
+const hoursPeople = () => [...new Set([...hours.map(h=>h.person).filter(Boolean), currentPerson()].filter(Boolean))];
+const fmtHours = h => (Math.round(h*100)/100).toLocaleString('en-GB',{maximumFractionDigits:2});
+
+// Hours between HH:MM times minus a break; an end before the start means past midnight.
+function hoursFromTimes(start,end,breakMin){
+  const toMin=t=>{const [h,m]=t.split(':').map(Number);return h*60+m;};
+  let mins=toMin(end)-toMin(start); if(mins<=0) mins+=24*60;
+  return Math.max(0,(mins-(breakMin||0))/60);
+}
+
+// Hours logged per person in a year.
+function hoursByPerson(year){
+  const by={}; hours.filter(h=>h.date.startsWith(year)).forEach(h=>{const p=h.person||'—';by[p]=(by[p]||0)+h.hours;}); return by;
+}
+
+// Progress bar + what's needed per week for the rest of the year.
+function hoursProgressHTML(year, person, total){
+  const pct=Math.min(total/HOURS_TARGET*100,100);
+  const today=new Date(), end=new Date(+year,11,31);
+  const weeksLeft=+year===today.getFullYear()?Math.max((end-today)/(7*864e5),0):0;
+  const left=Math.max(HOURS_TARGET-total,0);
+  const note=total>=HOURS_TARGET?'✓ Hours criterion met'
+    :weeksLeft>0&&left/weeksLeft>60?`${fmtHours(left)} hours to go — more than 60 a week until 31 Dec. Add the hours you've already worked this year but not logged yet (your order history and calendar help).`
+    :weeksLeft>0?`${fmtHours(left)} hours to go · about ${fmtHours(left/weeksLeft)} a week until 31 Dec`
+    :`${fmtHours(left)} hours short`;
+  return `<div style="margin-bottom:12px"><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:6px"><span>${esc(person)}</span><span style="font-family:var(--font-mono)">${fmtHours(total)} / ${HOURS_TARGET.toLocaleString('en-GB')} h</span></div>
+    <div style="height:8px;background:var(--paper2);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:${total>=HOURS_TARGET?'var(--green)':'var(--fire)'}"></div></div>
+    <div style="font-size:12px;color:${total>=HOURS_TARGET?'var(--green)':'var(--ink3)'};margin-top:6px">${note}</div></div>`;
+}
+
+function renderHoursDashboard(){
+  const el=$('dash-hours'); if(!el) return;
+  const y=String(new Date().getFullYear()), by=hoursByPerson(y);
+  const people=Object.keys(by).length?Object.keys(by):[currentPerson()||'You'];
+  el.innerHTML=people.map(p=>hoursProgressHTML(y,p,by[p]||0)).join('');
+}
+
+function renderHours(){
+  const years=[...new Set([...hours.map(h=>h.date.slice(0,4)),String(new Date().getFullYear())])].sort();
+  if(!hoursYear||!years.includes(hoursYear)) hoursYear=years[years.length-1];
+  $('hours-years').innerHTML=years.map(y=>`<button class="month-tab${y===hoursYear?' active':''}" onclick="hoursYear='${y}';renderHours()">${y}</button>`).join('');
+  const by=hoursByPerson(hoursYear);
+  const people=Object.keys(by).length?Object.keys(by):[currentPerson()||'You'];
+  $('hours-progress').innerHTML=people.map(p=>hoursProgressHTML(hoursYear,p,by[p]||0)).join('');
+  $('hours-people').innerHTML=hoursPeople().map(p=>`<option value="${esc(p)}">`).join('');
+  if(!editingHoursId&&!$('hours-date').value) resetHoursForm();
+
+  const list=hours.filter(h=>h.date.startsWith(hoursYear)).sort((a,b)=>b.date.localeCompare(a.date)||(b.start||'').localeCompare(a.start||''));
+  const byMonth={}; list.forEach(h=>(byMonth[h.date.slice(0,7)]=byMonth[h.date.slice(0,7)]||[]).push(h));
+  $('hours-list').innerHTML=list.length?Object.keys(byMonth).sort().reverse().map(m=>`
+    <div style="display:flex;justify-content:space-between;padding:10px 0 4px;font-size:10px;font-family:var(--font-mono);color:var(--ink3);text-transform:uppercase;letter-spacing:0.08em;border-top:1px solid var(--border);margin-top:6px"><span>${fmtMonth(m)}</span><span>${fmtHours(byMonth[m].reduce((s,h)=>s+h.hours,0))} h</span></div>
+    ${byMonth[m].map(h=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap">
+      <span style="font-family:var(--font-mono);font-size:12px;white-space:nowrap">${h.date}</span>
+      <span style="font-family:var(--font-mono);font-size:12px;color:var(--ink3);white-space:nowrap">${h.start&&h.end?`${h.start}–${h.end}${h.breakMin?` −${h.breakMin}m`:''}`:''}</span>
+      <span style="flex:1;min-width:120px">${esc(h.description||'')}${h.person?` <span style="font-size:11px;color:var(--ink3)">· ${esc(h.person)}</span>`:''}</span>
+      <span style="font-family:var(--font-mono);font-weight:600">${fmtHours(h.hours)} h</span>
+      <button class="btn btn-secondary btn-sm" onclick="editHours('${h.id}')">Edit</button>
+    </div>`).join('')}`).join(''):'<p style="font-size:13px;color:var(--ink3);padding:8px 0">No hours logged for this year yet.</p>';
+}
+
+function resetHoursForm(){
+  editingHoursId=null;
+  $('hours-date').value=new Date().toISOString().slice(0,10);
+  $('hours-start').value=''; $('hours-end').value=''; $('hours-break').value='';
+  $('hours-direct').value=''; $('hours-desc').value=''; $('hours-person').value=currentPerson();
+  $('hours-form-title').textContent='Log hours'; $('hours-delete').style.display='none';
+  updateHoursPreview();
+}
+
+function updateHoursPreview(){
+  const s=$('hours-start').value, e=$('hours-end').value, b=parseInt($('hours-break').value||'0',10)||0;
+  $('hours-preview').textContent=s&&e?`= ${fmtHours(hoursFromTimes(s,e,b))} hours`:'';
+}
+
+function editHours(id){
+  const h=hours.find(h=>h.id===id); if(!h) return;
+  editingHoursId=id;
+  $('hours-date').value=h.date; $('hours-start').value=h.start||''; $('hours-end').value=h.end||'';
+  $('hours-break').value=h.breakMin||''; $('hours-direct').value=h.start?'':h.hours;
+  $('hours-desc').value=h.description||''; $('hours-person').value=h.person||'';
+  $('hours-form-title').textContent='Edit hours'; $('hours-delete').style.display='inline-flex';
+  updateHoursPreview();
+  $('hours-form').scrollIntoView({behavior:'smooth',block:'center'});
+}
+
+function saveHours(){
+  const date=$('hours-date').value, start=$('hours-start').value, end=$('hours-end').value;
+  const breakMin=parseInt($('hours-break').value||'0',10)||0, direct=$('hours-direct').value.trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ alert('Please pick a date.'); return; }
+  let h;
+  if(start&&end){ h=hoursFromTimes(start,end,breakMin); }
+  else if(direct){ h=parseAmountInput(direct); }
+  else { alert('Enter a start and end time, or the number of hours.'); return; }
+  if(isNaN(h)||h<=0||h>24){ alert('Hours must be more than 0 and at most 24.'); return; }
+  const entry={date,start:start&&end?start:'',end:start&&end?end:'',breakMin:start&&end?breakMin:0,hours:Math.round(h*100)/100,
+    description:$('hours-desc').value.trim(),person:$('hours-person').value.trim()};
+  const sameDay=hours.filter(x=>x.date===date&&x.id!==editingHoursId&&(x.person||'')===entry.person).reduce((s,x)=>s+x.hours,0);
+  if(sameDay+entry.hours>24){ alert(`That would make ${fmtHours(sameDay+entry.hours)} hours on ${date} for ${entry.person||'this person'}.`); return; }
+  if(editingHoursId) Object.assign(hours.find(x=>x.id===editingHoursId),entry);
+  else hours.push({id:'hr_'+Math.random().toString(36).slice(2),...entry});
+  hoursYear=date.slice(0,4);
+  saveToDrive(); resetHoursForm(); renderHours(); renderHoursDashboard();
+}
+
+function deleteHours(){
+  if(!editingHoursId||!confirm('Delete this hours entry?')) return;
+  hours=hours.filter(h=>h.id!==editingHoursId);
+  saveToDrive(); resetHoursForm(); renderHours(); renderHoursDashboard();
+}
+
+function exportHoursCSV(){
+  const rows=[['Date','Start','End','Break (min)','Hours','Description','Person']];
+  hours.filter(h=>h.date.startsWith(hoursYear)).sort((a,b)=>a.date.localeCompare(b.date)).forEach(h=>rows.push([h.date,h.start||'',h.end||'',h.breakMin||0,h.hours,h.description||'',h.person||'']));
+  const csv=rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'})); a.download=`hours-${hoursYear}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
+// Import a CSV with the same columns as the export (Date and Hours required). Rows identical to
+// an existing entry (date, start, hours, person) are skipped, so importing twice is harmless.
+function importHoursCSV(input){
+  const file=input.files[0]; if(!file) return;
+  Papa.parse(file,{header:true,skipEmptyLines:true,complete:res=>{
+    let added=0, skipped=0, bad=0;
+    for(const r of res.data){
+      const date=(r['Date']||'').trim(), h=parseAmountInput(r['Hours']);
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(h)||h<=0||h>24){ bad++; continue; }
+      const entry={date,start:(r['Start']||'').trim(),end:(r['End']||'').trim(),breakMin:parseInt(r['Break (min)']||'0',10)||0,
+        hours:Math.round(h*100)/100,description:(r['Description']||'').trim(),person:(r['Person']||'').trim()||currentPerson()};
+      if(hours.some(x=>x.date===entry.date&&(x.start||'')===entry.start&&x.hours===entry.hours&&(x.person||'')===entry.person)){ skipped++; continue; }
+      hours.push({id:'hr_'+Math.random().toString(36).slice(2),...entry}); added++;
+    }
+    saveToDrive(); renderHours(); renderHoursDashboard();
+    alert(`${added} hours entries imported`+(skipped?` · ${skipped} already there`:'')+(bad?` · ${bad} rows skipped (need a date and hours)`:''));
+    input.value='';
+  }});
 }
 
 // ─── RECEIPTS ────────────────────────────────────────
@@ -1692,7 +1840,7 @@ function fmtMonth(m){
 }
 function fmtSize(b){return b<1048576?Math.round(b/1024)+' KB':(b/1048576).toFixed(1)+' MB'}
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')}
-function refreshAll(){renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();renderVatSettings();renderLockReminder();}
+function refreshAll(){renderHoursDashboard();renderDashboard();renderTransactions();renderReceipts();renderPL();renderPending();renderVatSettings();renderLockReminder();}
 
 // ─── AUTO SYNC ───────────────────────────────────────
 let autoSyncInterval = null;
@@ -1729,6 +1877,7 @@ function startAutoSync() {
           lockedQuarters = data.lockedQuarters || {};
           assets = data.assets || [];
           savingsOpening = data.savingsOpening || null;
+          hours = data.hours || [];
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);

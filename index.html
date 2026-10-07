@@ -58,6 +58,10 @@
         Pending
         <span id="nav-pending-badge" style="display:none;margin-left:auto;font-size:10px;background:var(--red);color:#fff;padding:1px 7px;border-radius:20px;font-family:var(--font-mono)"></span>
       </button>
+      <button class="nav-item" onclick="showPage('hours',this)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Hours
+      </button>
       <div class="nav-label">Reports</div>
       <button class="nav-item" onclick="showPage('pl',this)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -127,6 +131,13 @@
         <div class="stat expense"><div class="stat-label">Total expenses</div><div class="stat-val" id="stat-expense">€ 0</div><div class="stat-sub" id="stat-expense-sub">0 transactions</div></div>
         <div class="stat profit"><div class="stat-label">Net result</div><div class="stat-val" id="stat-profit">€ 0</div><div class="stat-sub"><span class="tag tag-kor vat-status-tag">KOR · no VAT</span></div></div>
         <div class="stat"><div class="stat-label">Receipts saved</div><div class="stat-val" id="stat-receipts">0</div><div class="stat-sub" id="stat-receipts-linked">0 linked</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px">
+          <div class="card-label" style="margin:0">Hours this year · 1,225 h criterion</div>
+          <button class="btn btn-secondary btn-sm" onclick="showPage('hours',null)">⏱ Log hours</button>
+        </div>
+        <div id="dash-hours"></div>
       </div>
       <div class="card">
         <div class="card-label">Monthly overview</div>
@@ -388,6 +399,45 @@
           </div>
         </div>
       </div>
+    </div>
+
+    <!-- HOURS -->
+    <div class="page" id="page-hours">
+      <div class="page-header">
+        <div class="row">
+          <div class="flex-1">
+            <h2>Hours</h2>
+            <p>Working hours for the hours criterion (urencriterium)</p>
+          </div>
+          <label class="btn btn-secondary btn-sm" style="cursor:pointer">Import CSV<input type="file" accept=".csv" onchange="importHoursCSV(this)"/></label>
+          <button class="btn btn-secondary btn-sm" onclick="exportHoursCSV()">Export CSV</button>
+        </div>
+      </div>
+      <div class="month-tabs" id="hours-years"></div>
+      <div class="card">
+        <div class="card-label">Progress</div>
+        <div id="hours-progress"></div>
+        <p style="font-size:11px;color:var(--ink3);line-height:1.6">For the self-employed deduction you need at least 1,225 hours a year on the business, and more than half of your working time. Log all business work — cooking, shopping, deliveries, admin — and keep this log as proof.</p>
+      </div>
+      <div class="card" id="hours-form">
+        <div style="font-weight:600;font-size:14px;margin-bottom:10px" id="hours-form-title">Log hours</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px">
+          <label style="font-size:12px;color:var(--ink2)">Date<input type="date" class="filter-input" id="hours-date" style="width:100%;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">Start<input type="time" class="filter-input" id="hours-start" oninput="updateHoursPreview()" style="width:100%;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">End<input type="time" class="filter-input" id="hours-end" oninput="updateHoursPreview()" style="width:100%;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">Break (min)<input class="filter-input" id="hours-break" inputmode="numeric" placeholder="0" oninput="updateHoursPreview()" style="width:100%;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">…or hours<input class="filter-input" id="hours-direct" inputmode="decimal" placeholder="e.g. 7,5" style="width:100%;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">Person<input class="filter-input" id="hours-person" list="hours-people" style="width:100%;margin-top:4px"/><datalist id="hours-people"></datalist></label>
+          <label style="font-size:12px;color:var(--ink2);grid-column:1/-1">What did you do?<input class="filter-input" id="hours-desc" placeholder="e.g. Cooking and packing delivery orders" style="width:100%;margin-top:4px"/></label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="saveHours()">Save</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetHoursForm()">Clear</button>
+          <span id="hours-preview" style="font-size:12px;font-family:var(--font-mono);color:var(--ink2)"></span>
+          <button class="btn btn-secondary btn-sm" id="hours-delete" style="margin-left:auto;color:var(--red);display:none" onclick="deleteHours()">Delete</button>
+        </div>
+      </div>
+      <div class="card"><div class="card-label">Logged hours</div><div id="hours-list"></div></div>
     </div>
 
     <!-- SETTINGS -->
