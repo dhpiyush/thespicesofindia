@@ -6,9 +6,15 @@ const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com
 const DATA_FILENAME = 'kitchen-data.json';
 // ────────────────────────────────────────────────────
 
-const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue','Other revenue','Private deposit'];
-const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal'];
+const CATEGORIES_IN  = ['Delivery revenue','Takeaway revenue','Catering revenue','Other revenue','Private deposit','Savings transfer'];
+const CATEGORIES_OUT = ['Ingredients','Packaging','Kitchen rent','Energy','Delivery platform','Wages','Marketing','Administration','Other costs','Private withdrawal','Savings transfer'];
 const PRIVATE_CATEGORIES = ['Private deposit','Private withdrawal'];
+// Money moved between the business current account and the business savings account: not
+// revenue or a cost, and not private either.
+const SAVINGS_CATEGORY = 'Savings transfer';
+const OUTSIDE_PL_CATEGORIES = [...PRIVATE_CATEGORIES, SAVINGS_CATEGORY];
+// Imports put transactions whose description mentions the savings account straight in SAVINGS_CATEGORY.
+const SAVINGS_PATTERN = /spaarrekening/i;
 
 // Shared duplicate check for CSV/XLSX imports: same date + amount + direction, with a fuzzy
 // (substring) desc match, since different export formats describe the same mutation differently.
@@ -43,6 +49,7 @@ let vatFrom = null; // YYYY-MM-DD the business left KOR and became VAT-liable; n
 let categoryVat = {}; // category → default VAT rate (%); categories not listed use DEFAULT_VAT_RATE
 let lockedQuarters = {}; // 'YYYY-Qn' → { lockedAt, vatNet } — closed quarters can't be edited
 let assets = []; // asset register: { id, name, purchaseDate, cost, lifeYears, residual, disposedDate, txnId }
+let savingsOpening = null; // { date, amount } — savings account balance on that date (Settings)
 let folderId = null, folderName = null;
 let dataFileId = null; // ID of kitchen-data.json in Drive
 let monthFolderCache = {};
@@ -104,6 +111,7 @@ async function loadFromDrive() {
       categoryVat = data.categoryVat || {};
       lockedQuarters = data.lockedQuarters || {};
       assets = data.assets || [];
+      savingsOpening = data.savingsOpening || null;
       lastSyncTime = new Date(
         (await fetch(`https://www.googleapis.com/drive/v3/files/${foundId}?fields=modifiedTime`,
           {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json())).modifiedTime
@@ -149,7 +157,7 @@ async function saveToDrive() {
   isSaving = true;
   showSyncStatus('saving');
   try {
-    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, updatedAt: new Date().toISOString() });
+    const payload = JSON.stringify({ transactions, receipts, pendingTasks, lastMatchJobRun, vatFrom, categoryVat, lockedQuarters, assets, savingsOpening, updatedAt: new Date().toISOString() });
     const blob = new Blob([payload], { type: 'application/json' });
 
     if (dataFileId) {
@@ -316,7 +324,7 @@ function handleSignOut() {
   localStorage.removeItem('kb_signed_in');
   localStorage.removeItem('kb_user_name');
   localStorage.removeItem('kb_user_email');
-  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; dataFileId=null; lastSyncTime=null;
+  accessToken=null; transactions=[]; receipts=[]; pendingTasks=[]; lastMatchJobRun=null; vatFrom=null; categoryVat={}; lockedQuarters={}; assets=[]; savingsOpening=null; dataFileId=null; lastSyncTime=null;
   $('auth-screen').style.display='flex';
   $('app').style.display='none';
 }
@@ -412,7 +420,7 @@ function importING(input) {
           transactions.push({
             id, date:dateStr, desc:descClean, bankDetails, amount:amt,
             type:isIn?'in':'out',
-            category:isIn?CATEGORIES_IN[0]:CATEGORIES_OUT[0],
+            category:SAVINGS_PATTERN.test(descClean+' '+bankDetails)?SAVINGS_CATEGORY:isIn?CATEGORIES_IN[0]:CATEGORIES_OUT[0],
             receiptId:null
           });
           added++;
@@ -504,7 +512,7 @@ function importMoneybird(input) {
           unmapped.add(linkedTo);
         } else {
           // No category (linked to a receipt filename/screenshot) — use default
-          category = isIn ? CATEGORIES_IN[0] : CATEGORIES_OUT[0];
+          category = SAVINGS_PATTERN.test(desc) ? SAVINGS_CATEGORY : isIn ? CATEGORIES_IN[0] : CATEGORIES_OUT[0];
         }
 
         // Override with private categories based on mapping
@@ -588,14 +596,14 @@ const DEFAULT_VAT_RATE = 9;
 const VAT_RATES = [0, 9, 21];
 const KOR_LIMIT = 20000;
 const categoryVatRate = cat => categoryVat[cat] != null ? categoryVat[cat] : DEFAULT_VAT_RATE;
-const vatRateOf = t => isPrivate(t) ? 0 : (t.vatRate != null ? t.vatRate : categoryVatRate(t.category));
+const vatRateOf = t => isOutsidePL(t) ? 0 : (t.vatRate != null ? t.vatRate : categoryVatRate(t.category));
 const vatOf = t => { const r = vatRateOf(t); return t.amount * r / (100 + r); };
 const isVatLiable = t => !!vatFrom && t.date >= vatFrom;
 // Amount used in the P&L: excl. VAT once VAT-liable, otherwise the full amount paid/received.
 const plAmount = t => isVatLiable(t) ? t.amount - vatOf(t) : t.amount;
 
 function vatSelect(t){
-  if(isPrivate(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
+  if(isOutsidePL(t)) return '<span style="font-size:11px;color:var(--ink3);font-family:var(--font-mono)">—</span>';
   const r=vatRateOf(t);
   if(isLockedDate(t.date)) return `<span style="font-size:11px;font-family:var(--font-mono)" title="Quarter is locked">${r}%</span>`;
   const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
@@ -621,16 +629,51 @@ function updateVat(id,sel){
 
 // ─── DASHBOARD ───────────────────────────────────────
 const isPrivate = t => PRIVATE_CATEGORIES.includes(t.category);
+const isSavings = t => t.category === SAVINGS_CATEGORY;
+// Private transfers and savings transfers: left out of revenue, costs, profit and VAT.
+const isOutsidePL = t => OUTSIDE_PL_CATEGORIES.includes(t.category);
+
+// Savings balance at the end of `date` (YYYY-MM-DD). The Settings balance is the balance at the
+// start of its date; transfers from that day on are added: money moved to savings ('out' from the
+// current account) adds, money moved back subtracts. null when no balance is set or `date` is
+// before the start.
+function savingsBalanceAt(date){
+  if(!savingsOpening||date<savingsOpening.date) return null;
+  return transactions.filter(t=>isSavings(t)&&t.date>=savingsOpening.date&&t.date<=date)
+    .reduce((s,t)=>s+(t.type==='out'?t.amount:-t.amount),savingsOpening.amount);
+}
+// Balance at the start of `date`, before that day's transfers.
+function savingsBalanceBefore(date){
+  if(!savingsOpening||date<savingsOpening.date) return null;
+  if(date===savingsOpening.date) return savingsOpening.amount;
+  const prev=new Date(new Date(date+'T00:00:00Z').getTime()-864e5).toISOString().slice(0,10);
+  return savingsBalanceAt(prev);
+}
+
+// Totals moved to and from savings for a list of transactions.
+function savingsMoves(list){
+  const sv=list.filter(isSavings);
+  return { toSavings: sv.filter(t=>t.type==='out').reduce((s,t)=>s+t.amount,0),
+           fromSavings: sv.filter(t=>t.type==='in').reduce((s,t)=>s+t.amount,0), count: sv.length };
+}
+
+function savingsSummaryHTML(list, endDate){
+  const m=savingsMoves(list), bal=savingsBalanceAt(endDate);
+  const row=(label,val,bold)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px${bold?';font-weight:600':''}"><span style="color:var(--ink2)">${label}</span><span style="font-family:var(--font-mono)">${val}</span></div>`;
+  return (m.count?row(`Moved to savings (${m.count} transfer${m.count===1?'':'s'})`,'€ '+fmtEur(m.toSavings))+row('Moved back from savings','€ '+fmtEur(m.fromSavings)):'<p style="font-size:13px;color:var(--ink3)">No savings transfers in this period</p>')
+    +(bal!=null?row(`Savings balance on ${endDate}`,'€ '+fmtEur(bal),true)
+      :`<p style="font-size:12px;color:var(--ink3);margin-top:6px">Set the savings account balance in Settings to see the running balance.</p>`);
+}
 function renderDashboard() {
   // Exclude private deposits/withdrawals from all P&L figures
-  const income =transactions.filter(t=>t.type==='in' &&!isPrivate(t)).reduce((s,t)=>s+t.amount,0);
-  const expense=transactions.filter(t=>t.type==='out'&&!isPrivate(t)).reduce((s,t)=>s+t.amount,0);
+  const income =transactions.filter(t=>t.type==='in' &&!isOutsidePL(t)).reduce((s,t)=>s+t.amount,0);
+  const expense=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)).reduce((s,t)=>s+t.amount,0);
   const profit=income-expense;
   const linked=receipts.filter(r=>transactions.some(t=>t.receiptId===r.id)).length;
   $('stat-income').textContent=fmtEur(income,true);
-  $('stat-income-sub').textContent=transactions.filter(t=>t.type==='in'&&!isPrivate(t)).length+' transactions';
+  $('stat-income-sub').textContent=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)).length+' transactions';
   $('stat-expense').textContent=fmtEur(expense,true);
-  $('stat-expense-sub').textContent=transactions.filter(t=>t.type==='out'&&!isPrivate(t)).length+' transactions';
+  $('stat-expense-sub').textContent=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)).length+' transactions';
   $('stat-profit').textContent=fmtEur(profit,true);
   $('stat-receipts').textContent=receipts.length;
   $('stat-receipts-linked').textContent=linked+' linked';
@@ -642,15 +685,15 @@ function renderDashboard() {
   )].sort();
   const chart=$('bar-chart');
   if(!months.length){chart.innerHTML='<div class="empty" style="padding:1rem;flex:1"><p>No data yet</p></div>';return;}
-  const maxVal=Math.max(...months.map(m=>{const i=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);const e=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);return Math.max(i,e);}),1);
+  const maxVal=Math.max(...months.map(m=>{const i=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);const e=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);return Math.max(i,e);}),1);
   chart.innerHTML=months.map(m=>{
-    const inc=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
-    const exp=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const inc=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
+    const exp=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)&&t.date.startsWith(m)).reduce((s,t)=>s+t.amount,0);
     const ih=Math.max(Math.round((inc/maxVal)*110),2);const eh=Math.max(Math.round((exp/maxVal)*110),2);
     return`<div class="bar-group"><div class="bar-wrap"><div class="bar income-bar" style="height:${ih}px" title="Revenue ${fmtEur(inc,true)}"></div><div class="bar expense-bar" style="height:${eh}px" title="Expenses ${fmtEur(exp,true)}"></div></div><div class="bar-label">${m.slice(5)}</div></div>`;
   }).join('');
   const recent=[...transactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
-  $('recent-txn-list').innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${recent.map(t=>`<tr><td style="font-family:var(--font-mono);font-size:12px">${t.date}</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><span class="badge ${isPrivate(t)?'badge-private':'badge-cat'}">${esc(t.category)}</span></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:1.5rem"><p>Import your bank statement to get started</p></div>';
+  $('recent-txn-list').innerHTML=recent.length?`<table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align:right">Amount</th></tr></thead><tbody>${recent.map(t=>`<tr><td style="font-family:var(--font-mono);font-size:12px">${t.date}</td><td style="max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)}</td><td><span class="badge ${isOutsidePL(t)?'badge-private':'badge-cat'}">${esc(t.category)}</span></td><td style="text-align:right"><span class="${t.type==='in'?'amount-in':'amount-out'}">${t.type==='in'?'+':'-'}${fmtEur(t.amount)}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty" style="padding:1.5rem"><p>Import your bank statement to get started</p></div>';
 }
 
 // ─── P&L ─────────────────────────────────────────────
@@ -663,7 +706,7 @@ function renderPL() {
   $('pl-months').innerHTML=months.map(m=>`<button class="month-tab${m===plMonth?' active':''}" onclick="setPLMonth('${m}',this)">${m==='all'?'Full year':fmtMonth(m)}</button>`).join('');
   const all=plMonth==='all'?transactions:transactions.filter(t=>t.date && t.date.startsWith(plMonth));
   // Exclude private categories and asset purchases (those are depreciated instead) from P&L
-  const filtered=all.filter(t=>!isPrivate(t)&&!assetOfTxn(t));
+  const filtered=all.filter(t=>!isOutsidePL(t)&&!assetOfTxn(t));
   const plMonths=plMonth==='all'?months.slice(1):[plMonth];
   const dep=plMonths.length?depreciationBetween(monthIndex(plMonths[0]+'-01'),monthIndex(plMonths[plMonths.length-1]+'-01')):0;
   const income=filtered.filter(t=>t.type==='in').reduce((s,t)=>s+plAmount(t),0);
@@ -681,6 +724,8 @@ function renderPL() {
   };
   byCat('in','pl-income-cats');byCat('out','pl-expense-cats');
   // Show private transfers separately
+  const lastDay=plMonth==='all'?(all.map(t=>t.date).sort().pop()||new Date().toISOString().slice(0,10)):plMonth+'-'+String(new Date(+plMonth.slice(0,4),+plMonth.slice(5,7),0).getDate()).padStart(2,'0');
+  if($('pl-savings')) $('pl-savings').innerHTML=savingsSummaryHTML(all,lastDay);
   const privateRows=all.filter(t=>isPrivate(t));
   const privTotal=privateRows.reduce((s,t)=>s+(t.type==='in'?t.amount:-t.amount),0);
   const privEl=$('pl-private');
@@ -713,7 +758,7 @@ function renderVAT(){
 
   // KOR limit tracker: business revenue this calendar year vs the €20,000 limit.
   const year=new Date().getFullYear().toString();
-  const revenue=transactions.filter(t=>t.type==='in'&&!isPrivate(t)&&t.date.startsWith(year)).reduce((s,t)=>s+t.amount,0);
+  const revenue=transactions.filter(t=>t.type==='in'&&!isOutsidePL(t)&&t.date.startsWith(year)).reduce((s,t)=>s+t.amount,0);
   const pct=Math.min(revenue/KOR_LIMIT*100,100);
   const korColor=pct>=100?'var(--red)':pct>=80?'#D97706':'var(--green)';
   $('vat-kor').innerHTML=vatFrom
@@ -730,7 +775,7 @@ function renderVAT(){
 
   const wrap=$('vat-return');
   if(!vatQuarter){wrap.innerHTML='<div class="empty"><p>No transactions yet</p></div>';return;}
-  const inQ=transactions.filter(t=>t.date&&quarterOf(t.date)===vatQuarter&&!isPrivate(t));
+  const inQ=transactions.filter(t=>t.date&&quarterOf(t.date)===vatQuarter&&!isOutsidePL(t));
   const liable=inQ.filter(isVatLiable);
   // Before vatFrom the figures are a preview: what the return would be without KOR.
   const rows=liable.length?liable:inQ;
@@ -768,6 +813,25 @@ function renderVatStatusLabels(){
   set('.vat-status-long',vatFrom?`VAT-registered from ${vatFrom}`:'KOR-exempt · no BTW');
 }
 
+function renderSavingsSettings(){
+  if(!$('settings-savings-amount')) return;
+  $('settings-savings-date').value=savingsOpening?savingsOpening.date:(transactions.map(t=>t.date).sort()[0]||new Date().toISOString().slice(0,4)+'-01-01').slice(0,4)+'-01-01';
+  $('settings-savings-amount').value=savingsOpening?savingsOpening.amount:'';
+  const bal=savingsBalanceAt(new Date().toISOString().slice(0,10));
+  $('settings-savings-now').textContent=bal!=null?`Current balance according to the portal: € ${fmtEur(bal)}`:'';
+}
+
+function saveSavingsOpening(){
+  const date=$('settings-savings-date').value, raw=$('settings-savings-amount').value.trim();
+  if(raw===''){ savingsOpening=null; }
+  else{
+    const amount=parseAmountInput(raw);
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||isNaN(amount)||amount<0){ alert('Please enter a date and a balance of 0 or more.'); return; }
+    savingsOpening={date,amount};
+  }
+  saveToDrive(); renderSavingsSettings(); renderPL();
+}
+
 function renderVatSettings(){
   renderVatStatusLabels();
   renderCategoryVat();
@@ -800,9 +864,9 @@ function setKor(inKor){
 // has no hand-set rate; hand-set ones can optionally be reset to the new default.
 function renderCategoryVat(){
   const wrap=$('settings-category-vat'); if(!wrap) return;
-  const cats=[...CATEGORIES_IN,...CATEGORIES_OUT].filter(c=>!PRIVATE_CATEGORIES.includes(c));
+  const cats=[...new Set([...CATEGORIES_IN,...CATEGORIES_OUT])].filter(c=>!OUTSIDE_PL_CATEGORIES.includes(c));
   // Also list categories that only exist in imported data (e.g. unmapped Moneybird ones).
-  transactions.forEach(t=>{if(!cats.includes(t.category)&&!PRIVATE_CATEGORIES.includes(t.category))cats.push(t.category);});
+  transactions.forEach(t=>{if(!cats.includes(t.category)&&!OUTSIDE_PL_CATEGORIES.includes(t.category))cats.push(t.category);});
   wrap.innerHTML=cats.map(c=>{
     const r=categoryVatRate(c);
     const opts=[...new Set([...VAT_RATES,r])].sort((a,b)=>a-b);
@@ -870,7 +934,7 @@ const lastLockedDay = () => { const q=Object.keys(lockedQuarters).sort().pop(); 
 async function lockQuarter(q,vatNet){
   if(!confirm(`Lock ${q.replace('-',' ')}?\n\nIts transactions can no longer be changed, and imports will skip new transactions dated in it. You can unlock it later if a correction is needed.`)) return;
   if(!await backupNow('before-lock-'+q) && !confirm('The backup failed. Lock anyway?')) return;
-  transactions.forEach(t=>{ if(t.date&&quarterOf(t.date)===q&&!isPrivate(t)&&t.vatRate==null) t.vatRate=vatRateOf(t); });
+  transactions.forEach(t=>{ if(t.date&&quarterOf(t.date)===q&&!isOutsidePL(t)&&t.vatRate==null) t.vatRate=vatRateOf(t); });
   lockedQuarters[q]={lockedAt:new Date().toISOString(),vatNet};
   await saveToDrive();
   renderVAT(); renderTransactions();
@@ -998,7 +1062,7 @@ async function restoreBackup(id,name){
   if(!confirm(`Restore "${name}"?\n\nIt has ${data.transactions.length} transactions and ${(data.receipts||[]).length} receipts (you now have ${transactions.length} and ${receipts.length}).\n\nYour current data is backed up first, so this can be undone.`)) return;
   if(!await backupNow('before-restore')){ alert('Could not back up the current data, so nothing was restored.'); return; }
   transactions=data.transactions; receipts=data.receipts||[]; pendingTasks=data.pendingTasks||[];
-  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[];
+  lastMatchJobRun=data.lastMatchJobRun||null; vatFrom=data.vatFrom||null; categoryVat=data.categoryVat||{}; lockedQuarters=data.lockedQuarters||{}; assets=data.assets||[]; savingsOpening=data.savingsOpening||null;
   await saveToDrive();
   refreshAll(); renderBackups();
   alert('Backup restored.');
@@ -1036,7 +1100,7 @@ let editingAssetId = null;
 function openAssetForm(id){
   editingAssetId=id||null;
   const a=id?assets.find(a=>a.id===id):null;
-  const linkable=transactions.filter(t=>t.type==='out'&&!isPrivate(t)&&(!t.assetId||(a&&t.id===a.txnId))&&t.amount>=50)
+  const linkable=transactions.filter(t=>t.type==='out'&&!isOutsidePL(t)&&(!t.assetId||(a&&t.id===a.txnId))&&t.amount>=50)
     .sort((x,y)=>y.amount-x.amount).slice(0,300);
   $('asset-txn').innerHTML='<option value="">— Not linked (paid privately or before using the app) —</option>'+linkable.map(t=>`<option value="${t.id}"${a&&a.txnId===t.id?' selected':''}>${t.date} · € ${fmtEur(t.amount)} · ${esc(t.desc.slice(0,40))}</option>`).join('');
   $('asset-name').value=a?a.name:'';
@@ -1110,7 +1174,7 @@ function renderYearEnd(){
   $('ye-years').innerHTML=years.map(y=>`<button class="month-tab${y===yearEndYear?' active':''}" onclick="yearEndYear='${y}';renderYearEnd()">${y}</button>`).join('');
   const y=yearEndYear, from=monthIndex(y+'-01-01'), to=monthIndex(y+'-12-01');
   const inYear=transactions.filter(t=>(t.date||'').startsWith(y));
-  const biz=inYear.filter(t=>!isPrivate(t)&&!assetOfTxn(t));
+  const biz=inYear.filter(t=>!isOutsidePL(t)&&!assetOfTxn(t));
   const sum=(list,f)=>list.reduce((s,t)=>s+f(t),0);
   const revenue=sum(biz.filter(t=>t.type==='in'),plAmount);
   const costsByCat={}; biz.filter(t=>t.type==='out').forEach(t=>costsByCat[t.category]=(costsByCat[t.category]||0)+plAmount(t));
@@ -1120,7 +1184,7 @@ function renderYearEnd(){
   const withdrawals=sum(inYear.filter(t=>isPrivate(t)&&t.type==='out'),t=>t.amount);
   const deposits=sum(inYear.filter(t=>isPrivate(t)&&t.type==='in'),t=>t.amount);
   const bought=assets.filter(a=>a.purchaseDate.startsWith(y));
-  const noReceipt=inYear.filter(t=>t.type==='out'&&!isPrivate(t)&&!t.receiptId);
+  const noReceipt=inYear.filter(t=>t.type==='out'&&!isOutsidePL(t)&&!t.receiptId);
   const quarters=[1,2,3,4].map(n=>y+'-Q'+n);
   const row=(label,val,opts={})=>`<div style="display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px${opts.bold?';font-weight:600':''}"><span>${label}</span><span style="font-family:var(--font-mono);white-space:nowrap${opts.color?';color:'+opts.color:''}">${opts.raw||'€ '+fmtEur(val)}</span></div>`;
 
@@ -1136,6 +1200,12 @@ function renderYearEnd(){
       ${row('Private withdrawals',withdrawals)}
       ${row('Private deposits',deposits)}
       ${row('Net withdrawn',withdrawals-deposits,{bold:true})}
+    </div>
+    <div class="card"><div class="card-label">Savings account (not in P&L)</div>
+      ${row('Balance on 1 Jan',0,{raw:savingsBalanceBefore(y+'-01-01')!=null?'€ '+fmtEur(savingsBalanceBefore(y+'-01-01')):'—'})}
+      ${row('Moved to savings',savingsMoves(inYear).toSavings)}
+      ${row('Moved back from savings',savingsMoves(inYear).fromSavings)}
+      ${row('Balance on 31 Dec',0,{bold:true,raw:savingsBalanceAt(y+'-12-31')!=null?'€ '+fmtEur(savingsBalanceAt(y+'-12-31')):'— (set the balance in Settings)'})}
     </div>
     <div class="card"><div class="card-label">Checks for your accountant</div>
       ${row('Expenses without a receipt',0,{raw:`${noReceipt.length} · € ${fmtEur(sum(noReceipt,t=>t.amount))}`,color:noReceipt.length?'#D97706':'var(--green)'})}
@@ -1158,7 +1228,7 @@ function renderYearEnd(){
     </tbody></table></div>`:'<p style="font-size:13px;color:var(--ink3);padding:8px 0">No assets yet.</p>';
 
   // Suggest large expenses that may be assets
-  const candidates=inYear.filter(t=>t.type==='out'&&!isPrivate(t)&&!t.assetId&&t.amount>=ASSET_MIN_COST).sort((a,b)=>b.amount-a.amount);
+  const candidates=inYear.filter(t=>t.type==='out'&&!isOutsidePL(t)&&!t.assetId&&t.amount>=ASSET_MIN_COST).sort((a,b)=>b.amount-a.amount);
   $('ye-candidates').innerHTML=candidates.length?`<div style="font-size:12px;background:#FFFBEB;color:#92400E;border-radius:var(--radius);padding:10px 12px;margin-top:12px">
       <div style="margin-bottom:6px">Expenses of € ${ASSET_MIN_COST} or more in ${y}. If one bought equipment or something else that lasts more than a year, mark it as an asset:</div>
       ${candidates.map(t=>`<div style="display:flex;align-items:center;gap:8px;padding:4px 0;flex-wrap:wrap"><span style="font-family:var(--font-mono)">${t.date}</span><span style="font-family:var(--font-mono)">€ ${fmtEur(t.amount)}</span><span style="flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.desc)} · ${esc(t.category)}</span><button class="btn btn-secondary btn-sm no-print" onclick="markTxnAsAsset('${t.id}')">Mark as asset</button></div>`).join('')}
@@ -1564,6 +1634,7 @@ function loadSavedFolder(){
 }
 function renderSettings(){
   renderVatSettings();
+  renderSavingsSettings();
   renderBackups();
   const nameEl=$('settings-folder-name');
   const idEl=$('settings-folder-id');
@@ -1657,6 +1728,7 @@ function startAutoSync() {
           categoryVat = data.categoryVat || {};
           lockedQuarters = data.lockedQuarters || {};
           assets = data.assets || [];
+          savingsOpening = data.savingsOpening || null;
           lastSyncTime = driveTime;
           refreshAll();
           showSyncStatus('saved', `Auto-synced · ${new Date().toLocaleTimeString()}`);

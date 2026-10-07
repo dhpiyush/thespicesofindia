@@ -328,6 +328,10 @@
         <div class="card-label" style="color:#6D28D9">Private transfers · excluded from P&amp;L</div>
         <div id="pl-private"><p style="font-size:13px;color:var(--ink3)">No private transfers</p></div>
       </div>
+      <div class="card" style="border-color:rgba(29,78,216,0.15);background:#FBFCFF">
+        <div class="card-label" style="color:#1D4ED8">Savings transfers · excluded from P&amp;L</div>
+        <div id="pl-savings"></div>
+      </div>
     </div>
 
     <!-- VAT -->
@@ -423,6 +427,18 @@
         <p style="font-size:12px;color:var(--ink3);margin-bottom:12px;line-height:1.6">A copy of <code style="font-family:var(--font-mono);font-size:11px;background:var(--paper2);padding:1px 5px;border-radius:4px">kitchen-data.json</code> is saved to a <strong>backups</strong> folder in Drive once a day when you open the app, and before locking a quarter or restoring. Daily copies are kept for 30 days; the first of each month and manual ones are kept for good.</p>
         <button class="btn btn-secondary btn-sm" onclick="backupNowFromSettings(this)" style="margin-bottom:10px">Back up now</button>
         <div id="settings-backups"></div>
+      </div>
+
+      <!-- Savings -->
+      <div class="card">
+        <div class="card-label">🏦 Savings account</div>
+        <p style="font-size:12px;color:var(--ink3);margin-bottom:12px;line-height:1.6">Transfers between your current account and the business savings account (category <strong>Savings transfer</strong>) are left out of the P&amp;L. ING imports mentioning "Spaarrekening" get this category automatically. Enter the savings balance on a date to see the running balance.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <label style="font-size:12px;color:var(--ink2)">Balance at the start of<input type="date" class="filter-input" id="settings-savings-date" style="display:block;margin-top:4px"/></label>
+          <label style="font-size:12px;color:var(--ink2)">Balance (€)<input class="filter-input" id="settings-savings-amount" inputmode="decimal" placeholder="e.g. 2500" style="display:block;margin-top:4px;width:140px"/></label>
+          <button class="btn btn-secondary btn-sm" onclick="saveSavingsOpening()">Save</button>
+        </div>
+        <div id="settings-savings-now" style="font-size:12px;color:var(--ink2);font-family:var(--font-mono);margin-top:10px"></div>
       </div>
 
       <!-- VAT / KOR -->
